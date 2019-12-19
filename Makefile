@@ -1,6 +1,6 @@
 SHELL := bash
 
-.PHONY: check venv dist sdist pyinstaller debian
+.PHONY: check venv dist sdist pyinstaller debian docker
 
 version := $(shell cat VERSION)
 architecture := $(shell dpkg-architecture | grep DEB_BUILD_ARCH= | sed 's/[^=]\+=//')
@@ -37,3 +37,6 @@ debian: pyinstaller
 	cp -R pyinstaller/dist/rhasspyasr_pocketsphinx_hermes "$(debian_dir)/usr/lib/"
 	cd debian/ && fakeroot dpkg --build "$(debian_package)"
 	mv "debian/$(debian_package).deb" dist/
+
+docker: pyinstaller
+	docker build . -t "rhasspy/rhasspy-asr-pocketsphinx-hermes:$(version)"
