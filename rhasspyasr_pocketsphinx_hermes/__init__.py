@@ -59,9 +59,8 @@ class AsrHermesMqtt:
         # Topic to listen for WAV chunks on
         self.audioframe_topics: typing.List[str] = []
         for siteId in self.siteIds:
-            self.audioframe_topics.append(AudioFrame.topic(siteId))
+            self.audioframe_topics.append(AudioFrame.topic(siteId=siteId))
 
-        self.audioframe_prefix: str = AudioFrame.topic("")
         self.first_audio: bool = True
 
     # -------------------------------------------------------------------------
@@ -85,7 +84,9 @@ class AsrHermesMqtt:
 
         _LOGGER.debug("Stopping listening (sessionId=%s)", message.sessionId)
 
-    def transcribe(self, audio_data: bytes, sessionId: str = ""):
+    def transcribe(
+        self, audio_data: bytes, siteId: str = "default", sessionId: str = ""
+    ):
         """Transcribe audio data and publish captured text."""
         try:
             with io.BytesIO() as wav_buffer:
@@ -104,7 +105,7 @@ class AsrHermesMqtt:
                             text=transcription.text,
                             likelihood=transcription.likelihood,
                             seconds=transcription.transcribe_seconds,
-                            siteId=self.siteId,
+                            siteId=siteId,
                             sessionId=sessionId,
                         )
                     )
@@ -117,7 +118,7 @@ class AsrHermesMqtt:
                             text="",
                             likelihood=0,
                             seconds=0,
-                            siteId=self.siteId,
+                            siteId=siteId,
                             sessionId=sessionId,
                         )
                     )
@@ -141,7 +142,7 @@ class AsrHermesMqtt:
                 topics.extend(self.audioframe_topics)
             else:
                 # All siteIds
-                topics.append(AudioFrame.topic("#"))
+                topics.append(AudioFrame.topic(siteId="#"))
 
             for topic in topics:
                 self.client.subscribe(topic)
@@ -152,7 +153,7 @@ class AsrHermesMqtt:
     def on_message(self, client, userdata, msg):
         """Received message from MQTT broker."""
         try:
-            if not msg.topic.startswith(self.audioframe_prefix):
+            if not msg.topic.endswith("/audioFrame"):
                 _LOGGER.debug("Received %s byte(s) on %s", len(msg.payload), msg.topic)
 
             # Check enable/disable messages
@@ -178,9 +179,10 @@ class AsrHermesMqtt:
                     self.first_audio = False
 
                 # Extract audio data.
-                audio_data = self._maybe_convert_wav(msg.payload)
+                audio_data = self.maybe_convert_wav(msg.payload)
 
                 # Add to every open session
+                siteId = AudioFrame.get_siteId(msg.topic)
                 for sessionId, recorder in self.session_recorders.items():
                     command = recorder.process_chunk(audio_data)
                     if command and (command.result == VoiceCommandResult.SUCCESS):
@@ -189,7 +191,9 @@ class AsrHermesMqtt:
                             sessionId,
                             len(command.audio_data),
                         )
-                        self.transcribe(command.audio_data, sessionId)
+                        self.transcribe(
+                            command.audio_data, siteId=siteId, sessionId=sessionId
+                        )
 
                         # Reset session (but keep open)
                         recorder.stop()
@@ -243,7 +247,7 @@ class AsrHermesMqtt:
                 "-e",
                 "signed-integer",
                 "-b",
-                str(self.sample_width),
+                str(self.sample_width * 8),
                 "-c",
                 str(self.channels),
                 "-t",
@@ -255,7 +259,7 @@ class AsrHermesMqtt:
             input=wav_data,
         ).stdout
 
-    def _maybe_convert_wav(self, wav_bytes: bytes) -> bytes:
+    def maybe_convert_wav(self, wav_bytes: bytes) -> bytes:
         """Converts WAV data to required format if necessary. Returns raw audio."""
         with io.BytesIO(wav_bytes) as wav_io:
             with wave.open(wav_io, "rb") as wav_file:

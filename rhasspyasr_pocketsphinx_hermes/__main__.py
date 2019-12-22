@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 import os
+import sys
 import typing
 from pathlib import Path
 
@@ -50,6 +51,9 @@ def main():
         help="Hermes siteId(s) to listen for (default: all)",
     )
     parser.add_argument(
+        "--stdin-files", action="store_true", help="Read WAV file paths from stdin"
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Print DEBUG messages to the console"
     )
     args = parser.parse_args()
@@ -86,6 +90,17 @@ def main():
             mllr_matrix=args.mllr_matrix,
             debug=args.debug,
         )
+
+        if args.stdin_files:
+            client = StdoutClient()
+            hermes = AsrHermesMqtt(client, transcriber)
+            for wav_path in sys.stdin:
+                wav_path = Path(wav_path.strip())
+                _LOGGER.debug("Transcribing %s", str(wav_path))
+                wav_bytes = wav_path.read_bytes()
+                audio_bytes = hermes.maybe_convert_wav(wav_bytes)
+                hermes.transcribe(audio_bytes)
+            return
 
         # Listen for messages
         client = mqtt.Client()
@@ -181,6 +196,21 @@ def poll_files(
                     last_timestamp[path] = timestamp
         except Exception:
             _LOGGER.exception("poll_files")
+
+
+# -----------------------------------------------------------------------------
+
+
+class StdoutClient:
+    """Fake MQTT client that publishes message payloads to stdout."""
+
+    def publish(self, topic: str, payload: typing.Union[str, bytes]):
+        sys.stdout.write(payload)
+        print("")
+
+    def subscribe(self, topic: str):
+        """Discard subscriptions"""
+        pass
 
 
 # -----------------------------------------------------------------------------

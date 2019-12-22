@@ -4,3 +4,4 @@ debian/rhasspy-asr-pocketsphinx-hermes*
 dist/
 *.egg-info/
 pyinstaller/
+etc/test/cmusphinx-en-us-ptm-5.2/

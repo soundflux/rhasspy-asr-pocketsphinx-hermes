@@ -20,6 +20,9 @@ venv:
 
 dist: sdist debian
 
+test:
+	scripts/test_wavs.sh
+
 sdist:
 	python3 setup.py sdist
 
