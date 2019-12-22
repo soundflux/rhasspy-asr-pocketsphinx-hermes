@@ -1,24 +1,23 @@
 # -*- mode: python -*-
 import os
+import site
 from pathlib import Path
 
 from PyInstaller.utils.hooks import copy_metadata
 
 block_cipher = None
 
-# Use either virtual environment or lib/bin dirs from environment variables
-venv = Path.cwd() / ".venv"
-venv_lib = venv / "lib"
-for dir_path in venv_lib.glob("python*"):
-    if dir_path.is_dir() and (dir_path / "site-packages").exists():
-        site_dir = dir_path / "site-packages"
+# Need to specially handle these snowflakes
+webrtcvad_path = None
+
+for site_dir in site.getsitepackages():
+    site_dir = Path(site_dir)
+    webrtcvad_paths = list(site_dir.glob("_webrtcvad.*.so"))
+    if webrtcvad_paths:
+        webrtcvad_path = webrtcvad_paths[0]
         break
 
-assert site_dir is not None, "Missing site-packages directory"
-site_dir = Path(site_dir)
-
-# Need to specially handle these snowflakes
-webrtcvad_path = list(site_dir.glob("_webrtcvad.*.so"))[0]
+assert webrtcvad_path, "Missing webrtcvad"
 
 a = Analysis(
     [Path.cwd() / "__main__.py"],
