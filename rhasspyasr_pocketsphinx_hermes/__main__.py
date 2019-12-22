@@ -205,6 +205,7 @@ class StdoutClient:
     """Fake MQTT client that publishes message payloads to stdout."""
 
     def publish(self, topic: str, payload: typing.Union[str, bytes]):
+        """Print payload to stdout"""
         sys.stdout.write(payload)
         print("")
 
