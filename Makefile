@@ -40,3 +40,7 @@ debian: pyinstaller
 
 docker: pyinstaller
 	docker build . -t "rhasspy/rhasspy-asr-pocketsphinx-hermes:$(version)"
+
+deploy:
+	echo "$$DOCKER_PASSWORD" | docker login -u "$$DOCKER_USERNAME" --password-stdin
+	docker push rhasspy/rhasspy-asr-pocketsphinx:$(version)
