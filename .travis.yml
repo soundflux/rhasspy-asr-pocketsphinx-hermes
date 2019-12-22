@@ -5,6 +5,8 @@ language: python
 python:
 - 3.6
 - 3.7
+before_install:
+- sudo apt-get install -y sox swig portaudio19-dev
 install:
 - pip install -r requirements_all.txt
 script:
