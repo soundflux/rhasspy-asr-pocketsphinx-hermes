@@ -137,11 +137,7 @@ class AsrHermesMqtt:
 
                 # Empty transcription
                 return AsrTextCaptured(
-                    text="",
-                    likelihood=0,
-                    seconds=0,
-                    siteId=siteId,
-                    sessionId=sessionId,
+                    text="", likelihood=0, seconds=0, siteId=siteId, sessionId=sessionId
                 )
         except Exception as e:
             _LOGGER.exception("transcribe")
@@ -199,15 +195,19 @@ class AsrHermesMqtt:
                 # Disabled
                 return
 
-            if (not self.audioframe_topics) or (msg.topic in self.audioframe_topics):
-                # Add to all active sessions
-                if self.first_audio:
-                    _LOGGER.debug("Receiving audio")
-                    self.first_audio = False
+            if AudioFrame.is_topic(msg.topic):
+                # Check siteId
+                if (not self.audioframe_topics) or (
+                    msg.topic in self.audioframe_topics
+                ):
+                    # Add to all active sessions
+                    if self.first_audio:
+                        _LOGGER.debug("Receiving audio")
+                        self.first_audio = False
 
-                siteId = AudioFrame.get_siteId(msg.topic)
-                for result in self.handle_audio_frame(msg.payload, siteId=siteId):
-                    self.publish(result)
+                    siteId = AudioFrame.get_siteId(msg.topic)
+                    for result in self.handle_audio_frame(msg.payload, siteId=siteId):
+                        self.publish(result)
 
             elif msg.topic == AsrStartListening.topic():
                 # hermes/asr/startListening
