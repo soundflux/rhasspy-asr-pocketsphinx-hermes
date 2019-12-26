@@ -21,6 +21,8 @@ from rhasspyhermes.audioserver import AudioFrame
 from rhasspyasr import Transcriber
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
 
+from .messages import AsrError
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -84,9 +86,32 @@ class AsrHermesMqtt:
 
         _LOGGER.debug("Stopping listening (sessionId=%s)", message.sessionId)
 
+    def handle_audio_frame(
+        self, audio_data: bytes, siteId: str = "default"
+    ) -> typing.Iterable[typing.Union[AsrTextCaptured, AsrError]]:
+        """Process single frame of WAV audio"""
+        audio_data = self.maybe_convert_wav(audio_data)
+
+        # Add to every open session
+        for sessionId, recorder in self.session_recorders.items():
+            command = recorder.process_chunk(audio_data)
+            if command and (command.result == VoiceCommandResult.SUCCESS):
+                _LOGGER.debug(
+                    "Voice command recorded for session %s (%s byte(s))",
+                    sessionId,
+                    len(command.audio_data),
+                )
+                yield self.transcribe(
+                    command.audio_data, siteId=siteId, sessionId=sessionId
+                )
+
+                # Reset session (but keep open)
+                recorder.stop()
+                recorder.start()
+
     def transcribe(
         self, audio_data: bytes, siteId: str = "default", sessionId: str = ""
-    ):
+    ) -> typing.Union[AsrTextCaptured, AsrError]:
         """Transcribe audio data and publish captured text."""
         try:
             with io.BytesIO() as wav_buffer:
@@ -100,30 +125,32 @@ class AsrHermesMqtt:
                 transcription = self.transcriber.transcribe_wav(wav_buffer.getvalue())
                 if transcription:
                     # Actual transcription
-                    self.publish(
-                        AsrTextCaptured(
-                            text=transcription.text,
-                            likelihood=transcription.likelihood,
-                            seconds=transcription.transcribe_seconds,
-                            siteId=siteId,
-                            sessionId=sessionId,
-                        )
+                    return AsrTextCaptured(
+                        text=transcription.text,
+                        likelihood=transcription.likelihood,
+                        seconds=transcription.transcribe_seconds,
+                        siteId=siteId,
+                        sessionId=sessionId,
                     )
-                else:
-                    _LOGGER.warning("Received empty transcription")
 
-                    # Empty transcription
-                    self.publish(
-                        AsrTextCaptured(
-                            text="",
-                            likelihood=0,
-                            seconds=0,
-                            siteId=siteId,
-                            sessionId=sessionId,
-                        )
-                    )
-        except Exception:
+                _LOGGER.warning("Received empty transcription")
+
+                # Empty transcription
+                return AsrTextCaptured(
+                    text="",
+                    likelihood=0,
+                    seconds=0,
+                    siteId=siteId,
+                    sessionId=sessionId,
+                )
+        except Exception as e:
             _LOGGER.exception("transcribe")
+            return AsrError(
+                error=str(e),
+                context=repr(self.transcriber),
+                siteId=siteId,
+                sessionId=sessionId,
+            )
 
     # -------------------------------------------------------------------------
 
@@ -178,26 +205,9 @@ class AsrHermesMqtt:
                     _LOGGER.debug("Receiving audio")
                     self.first_audio = False
 
-                # Extract audio data.
-                audio_data = self.maybe_convert_wav(msg.payload)
-
-                # Add to every open session
                 siteId = AudioFrame.get_siteId(msg.topic)
-                for sessionId, recorder in self.session_recorders.items():
-                    command = recorder.process_chunk(audio_data)
-                    if command and (command.result == VoiceCommandResult.SUCCESS):
-                        _LOGGER.debug(
-                            "Voice command recorded for session %s (%s byte(s))",
-                            sessionId,
-                            len(command.audio_data),
-                        )
-                        self.transcribe(
-                            command.audio_data, siteId=siteId, sessionId=sessionId
-                        )
-
-                        # Reset session (but keep open)
-                        recorder.stop()
-                        recorder.start()
+                for result in self.handle_audio_frame(msg.payload, siteId=siteId):
+                    self.publish(result)
 
             elif msg.topic == AsrStartListening.topic():
                 # hermes/asr/startListening

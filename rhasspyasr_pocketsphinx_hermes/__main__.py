@@ -1,5 +1,6 @@
 """Command-line interface to rhasspyasr-kaldi-hermes"""
 import argparse
+import json
 import logging
 import threading
 import time
@@ -8,8 +9,10 @@ import sys
 import typing
 from pathlib import Path
 
+import attr
 import paho.mqtt.client as mqtt
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
+from rhasspyhermes.asr import AsrTextCaptured
 
 from . import AsrHermesMqtt
 
@@ -92,14 +95,18 @@ def main():
         )
 
         if args.stdin_files:
-            client = StdoutClient()
-            hermes = AsrHermesMqtt(client, transcriber)
+            hermes = AsrHermesMqtt(client=None, transcriber=transcriber)
             for wav_path in sys.stdin:
                 wav_path = Path(wav_path.strip())
                 _LOGGER.debug("Transcribing %s", str(wav_path))
                 wav_bytes = wav_path.read_bytes()
                 audio_bytes = hermes.maybe_convert_wav(wav_bytes)
-                hermes.transcribe(audio_bytes)
+                result = hermes.transcribe(audio_bytes)
+
+                # Print messages as JSON
+                assert isinstance(result, AsrTextCaptured)
+                json.dump(attr.asdict(result), sys.stdout)
+                print("")
             return
 
         # Listen for messages
@@ -196,22 +203,6 @@ def poll_files(
                     last_timestamp[path] = timestamp
         except Exception:
             _LOGGER.exception("poll_files")
-
-
-# -----------------------------------------------------------------------------
-
-
-class StdoutClient:
-    """Fake MQTT client that publishes message payloads to stdout."""
-
-    def publish(self, topic: str, payload: typing.Union[str, bytes]):
-        """Print payload to stdout"""
-        sys.stdout.write(payload)
-        print("")
-
-    def subscribe(self, topic: str):
-        """Discard subscriptions"""
-        pass
 
 
 # -----------------------------------------------------------------------------
