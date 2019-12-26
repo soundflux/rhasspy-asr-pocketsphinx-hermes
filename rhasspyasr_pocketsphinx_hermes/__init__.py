@@ -87,10 +87,10 @@ class AsrHermesMqtt:
         _LOGGER.debug("Stopping listening (sessionId=%s)", message.sessionId)
 
     def handle_audio_frame(
-        self, audio_data: bytes, siteId: str = "default"
+        self, wav_bytes: bytes, siteId: str = "default"
     ) -> typing.Iterable[typing.Union[AsrTextCaptured, AsrError]]:
         """Process single frame of WAV audio"""
-        audio_data = self.maybe_convert_wav(audio_data)
+        audio_data = self.maybe_convert_wav(wav_bytes)
 
         # Add to every open session
         for sessionId, recorder in self.session_recorders.items():
