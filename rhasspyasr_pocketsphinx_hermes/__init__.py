@@ -165,7 +165,7 @@ class AsrHermesMqtt:
                 topics.extend(self.audioframe_topics)
             else:
                 # All siteIds
-                topics.append(AudioFrame.topic(siteId="#"))
+                topics.append(AudioFrame.topic(siteId="+"))
 
             for topic in topics:
                 self.client.subscribe(topic)
