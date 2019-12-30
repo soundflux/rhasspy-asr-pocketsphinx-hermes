@@ -56,7 +56,9 @@ class AsrHermesMqtt:
         )
 
         # WAV buffers for each session
-        self.session_recorders = defaultdict(VoiceCommandRecorder)
+        self.session_recorders: typing.Dict[str, VoiceCommandRecorder] = defaultdict(
+            VoiceCommandRecorder
+        )
 
         # Topic to listen for WAV chunks on
         self.audioframe_topics: typing.List[str] = []
@@ -94,20 +96,29 @@ class AsrHermesMqtt:
 
         # Add to every open session
         for sessionId, recorder in self.session_recorders.items():
-            command = recorder.process_chunk(audio_data)
-            if command and (command.result == VoiceCommandResult.SUCCESS):
-                _LOGGER.debug(
-                    "Voice command recorded for session %s (%s byte(s))",
-                    sessionId,
-                    len(command.audio_data),
-                )
-                yield self.transcribe(
-                    command.audio_data, siteId=siteId, sessionId=sessionId
-                )
+            try:
+                command = recorder.process_chunk(audio_data)
+                if command and (command.result == VoiceCommandResult.SUCCESS):
+                    assert command.audio_data is not None
+                    _LOGGER.debug(
+                        "Voice command recorded for session %s (%s byte(s))",
+                        sessionId,
+                        len(command.audio_data),
+                    )
+                    yield self.transcribe(
+                        command.audio_data, siteId=siteId, sessionId=sessionId
+                    )
 
-                # Reset session (but keep open)
-                recorder.stop()
-                recorder.start()
+                    # Reset session (but keep open)
+                    recorder.stop()
+                    recorder.start()
+            except Exception as e:
+                yield AsrError(
+                    error=str(e),
+                    context=repr(self.transcriber),
+                    siteId=siteId,
+                    sessionId=sessionId,
+                )
 
     def transcribe(
         self, audio_data: bytes, siteId: str = "default", sessionId: str = ""
