@@ -38,7 +38,7 @@ class AsrHermesMqtt:
         sample_rate: int = 16000,
         sample_width: int = 2,
         channels: int = 1,
-        make_recorder: typing.Callable[[], VoiceCommandRecorder] = None,
+        make_recorder: typing.Callable[[None], VoiceCommandRecorder] = None,
     ):
         self.client = client
         self.transcriber = transcriber
