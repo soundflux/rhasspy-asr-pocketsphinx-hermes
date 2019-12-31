@@ -51,9 +51,10 @@ class AsrHermesMqtt:
         self.channels = channels
 
         # No timeout
-        self.make_recorder = make_recorder or (
-            lambda: WebRtcVadRecorder(max_seconds=None)
-        )
+        def default_recorder():
+            return WebRtcVadRecorder(max_seconds=None)
+
+        self.make_recorder = make_recorder or default_recorder
 
         # WAV buffers for each session
         self.session_recorders: typing.Dict[str, VoiceCommandRecorder] = defaultdict(
