@@ -1,4 +1,5 @@
 SHELL := bash
+PYTHON_FILES = rhasspyasr_pocketsphinx_hermes/*.py *.py
 
 .PHONY: check venv dist sdist pyinstaller debian docker
 
@@ -9,15 +10,17 @@ debian_package := rhasspy-asr-pocketsphinx-hermes_$(version)_$(architecture)
 debian_dir := debian/$(debian_package)
 
 check:
-	flake8 rhasspyasr_pocketsphinx_hermes/*.py
-	pylint rhasspyasr_pocketsphinx_hermes/*.py
-	mypy rhasspyasr_pocketsphinx_hermes/*.py
+	flake8 $(PYTHON_FILES)
+	pylint $(PYTHON_FILES)
+	mypy $(PYTHON_FILES)
 
 venv:
 	rm -rf .venv/
 	python3 -m venv .venv
+	.venv/bin/pip3 install --upgrade pip
 	.venv/bin/pip3 install wheel setuptools
-	.venv/bin/pip3 install -r requirements_all.txt
+	.venv/bin/pip3 install -r requirements.txt
+	.venv/bin/pip3 install -r requirements_dev.txt
 
 dist: sdist debian
 

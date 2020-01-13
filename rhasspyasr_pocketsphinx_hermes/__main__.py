@@ -37,6 +37,11 @@ def main():
         "--mllr-matrix", default=None, help="Path to tuned MLLR matrix file"
     )
     parser.add_argument(
+        "--base-dictionary",
+        action="append",
+        help="Path(s) to base pronunciation dictionary file(s)",
+    )
+    parser.add_argument(
         "--reload",
         type=float,
         default=None,
@@ -86,6 +91,9 @@ def main():
         if args.mllr_matrix:
             args.mllr_matrix = Path(args.mllr_matrix)
 
+        if args.base_dictionary:
+            args.base_dictionary = [Path(p) for p in args.base_dictionary]
+
         transcriber = PocketsphinxTranscriber(
             args.acoustic_model,
             args.dictionary,
@@ -96,6 +104,7 @@ def main():
 
         if args.stdin_files:
             hermes = AsrHermesMqtt(client=None, transcriber=transcriber)
+
             for wav_path in sys.stdin:
                 wav_path = Path(wav_path.strip())
                 _LOGGER.debug("Transcribing %s", str(wav_path))
@@ -111,7 +120,12 @@ def main():
 
         # Listen for messages
         client = mqtt.Client()
-        hermes = AsrHermesMqtt(client, transcriber, siteIds=args.siteId)
+        hermes = AsrHermesMqtt(
+            client,
+            transcriber,
+            base_dictionaries=args.base_dictionary,
+            siteIds=args.siteId,
+        )
 
         if args.reload:
             # Start polling thread

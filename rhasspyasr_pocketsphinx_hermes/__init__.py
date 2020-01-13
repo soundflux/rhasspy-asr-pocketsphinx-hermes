@@ -2,13 +2,18 @@
 import io
 import json
 import logging
+import re
 import subprocess
+import tempfile
 import typing
 import wave
 from collections import defaultdict
+from pathlib import Path
 
 import attr
 
+import rhasspyasr
+import rhasspynlu
 from rhasspyhermes.base import Message
 from rhasspyhermes.asr import (
     AsrStartListening,
@@ -18,12 +23,17 @@ from rhasspyhermes.asr import (
     AsrToggleOff,
 )
 from rhasspyhermes.audioserver import AudioFrame
-from rhasspyasr import Transcriber
+from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
 
 from .messages import AsrError
 
 _LOGGER = logging.getLogger(__name__)
+
+TRAIN_TOPIC = "rhasspy/asr/{siteId}/train"
+TRAIN_TOPIC_PATTERN = re.compile(r"^rhasspy/asr/([^/]+)/train$")
+
+# -----------------------------------------------------------------------------
 
 
 class AsrHermesMqtt:
@@ -32,7 +42,8 @@ class AsrHermesMqtt:
     def __init__(
         self,
         client,
-        transcriber: Transcriber,
+        transcriber: PocketsphinxTranscriber,
+        base_dictionaries: typing.Optional[typing.List[Path]] = None,
         siteIds: typing.Optional[typing.List[str]] = None,
         enabled: bool = True,
         sample_rate: int = 16000,
@@ -42,6 +53,7 @@ class AsrHermesMqtt:
     ):
         self.client = client
         self.transcriber = transcriber
+        self.base_dictionaries = base_dictionaries or []
         self.siteIds = siteIds or []
         self.enabled = enabled
 
@@ -162,6 +174,92 @@ class AsrHermesMqtt:
 
     # -------------------------------------------------------------------------
 
+    def retrain(
+        self, json_graph: typing.Dict[str, typing.Any], siteId: str = "default"
+    ):
+        """Re-generates language model and dictionary from JSON graph"""
+        try:
+            _LOGGER.debug("Retraining")
+            graph = rhasspynlu.json_to_graph(json_graph)
+
+            # Generate counts
+            intent_counts = rhasspynlu.get_intent_ngram_counts(graph)
+
+            # TODO: Balance counts
+
+            # Use mitlm to create language model
+            vocabulary: typing.Set[str] = set()
+
+            with tempfile.NamedTemporaryFile(mode="w") as count_file:
+                for intent_name in intent_counts:
+                    for ngram, count in intent_counts[intent_name].items():
+                        # word [word] ... <TAB> count
+                        print(*ngram, file=count_file, end="")
+                        print("\t", count, file=count_file)
+
+                count_file.seek(0)
+                with tempfile.NamedTemporaryFile(mode="w+") as vocab_file:
+                    subprocess.check_call(
+                        [
+                            "estimate-ngram",
+                            "-order",
+                            "3",
+                            "-counts",
+                            count_file.name,
+                            "-write-lm",
+                            str(self.transcriber.language_model),
+                            "-write-vocab",
+                            vocab_file.name,
+                        ]
+                    )
+
+                    # Extract vocabulary
+                    vocab_file.seek(0)
+                    for line in vocab_file:
+                        line = line.strip()
+                        if not line.startswith("<"):
+                            vocabulary.add(line)
+
+            _LOGGER.debug(
+                "Wrote language model to %s", str(self.transcriber.language_model)
+            )
+
+            # Write dictionary
+            if vocabulary:
+                # Load base dictionaries
+                pronunciations: typing.Dict[str, typing.List[str]] = {}
+
+                for base_dict_path in self.base_dictionaries:
+                    _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
+                    with open(base_dict_path, "r") as base_dict_file:
+                        rhasspyasr.read_dict(base_dict_file, word_dict=pronunciations)
+
+                with open(self.transcriber.dictionary, "w") as dict_file:
+                    for word in vocabulary:
+                        word_phonemes = pronunciations.get(word)
+                        if not word_phonemes:
+                            # TODO: G2P
+                            _LOGGER.warning("Missing word '%s'", word)
+                            continue
+
+                        # Write CMU format
+                        for i, phonemes in enumerate(word_phonemes):
+                            if i == 0:
+                                print(word, phonemes, file=dict_file)
+                            else:
+                                print(f"{word}({i+1})", phonemes, file=dict_file)
+
+                _LOGGER.debug("Wrote dictionary to %s", str(self.transcriber.dictionary))
+
+            # Force decoder to be reloaded on next use
+            self.transcriber.decoder = None
+
+            _LOGGER.debug("Reloaded")
+        except Exception:
+            _LOGGER.exception("retrain")
+
+    # -------------------------------------------------------------------------
+
     def on_connect(self, client, userdata, flags, rc):
         """Connected to MQTT broker."""
         try:
@@ -178,6 +276,15 @@ class AsrHermesMqtt:
             else:
                 # All siteIds
                 topics.append(AudioFrame.topic(siteId="+"))
+
+            if self.siteIds:
+                # Specific siteIds
+                topics.extend(
+                    [TRAIN_TOPIC.format(siteId=siteId) for siteId in self.siteIds]
+                )
+            else:
+                # All siteIds
+                topics.append(TRAIN_TOPIC.format(siteId="+"))
 
             for topic in topics:
                 self.client.subscribe(topic)
@@ -231,6 +338,13 @@ class AsrHermesMqtt:
                 json_payload = json.loads(msg.payload)
                 if self._check_siteId(json_payload):
                     self.stop_listening(AsrStopListening(**json_payload))
+            else:
+                # rhasspy/asr/<siteId>/train
+                match = TRAIN_TOPIC_PATTERN.match(msg.topic)
+                if match:
+                    siteId = match.group(1)
+                    json_graph = json.loads(msg.payload)
+                    self.retrain(json_graph, siteId=siteId)
         except Exception:
             _LOGGER.exception("on_message")
 

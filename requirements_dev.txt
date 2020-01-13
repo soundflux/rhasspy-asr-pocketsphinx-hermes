@@ -1,0 +1,4 @@
+flake8==3.7.9
+pylint==2.4.4
+mypy==0.700
+pyinstaller==3.5
