@@ -10,7 +10,13 @@ block_cipher = None
 # Need to specially handle these snowflakes
 webrtcvad_path = None
 
-for site_dir in site.getsitepackages():
+site_dirs = site.getsitepackages()
+
+rhasspy_site_packages = os.environ.get("RHASSPY_SITE_PACKAGES")
+if rhasspy_site_packages:
+    site_dirs = [rhasspy_site_packages] + site_dirs
+
+for site_dir in site_dirs:
     site_dir = Path(site_dir)
     webrtcvad_paths = list(site_dir.glob("_webrtcvad.*.so"))
     if webrtcvad_paths:
@@ -24,7 +30,7 @@ a = Analysis(
     pathex=["."],
     binaries=[(webrtcvad_path, ".")],
     datas=copy_metadata("webrtcvad"),
-    hiddenimports=[],
+    hiddenimports=['pkg_resources.py2_warn'],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],

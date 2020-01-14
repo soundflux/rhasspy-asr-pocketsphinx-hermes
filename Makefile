@@ -33,6 +33,7 @@ sdist:
 pyinstaller:
 	mkdir -p dist
 	pyinstaller -y --workpath pyinstaller/build --distpath pyinstaller/dist rhasspyasr_pocketsphinx_hermes.spec
+	cd pyinstaller/dist/rhasspyasr_pocketsphinx_hermes/ && rm -rf share notebook
 	tar -C pyinstaller/dist -czf dist/rhasspy-asr-pocketsphinx-hermes_$(version)_$(architecture).tar.gz rhasspyasr_pocketsphinx_hermes/
 
 debian: pyinstaller
