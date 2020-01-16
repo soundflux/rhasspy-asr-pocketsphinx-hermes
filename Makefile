@@ -42,7 +42,7 @@ sdist:
 # -----------------------------------------------------------------------------
 
 docker: pyinstaller mitlm-0.4.2-$(architecture).tar.gz
-	docker build . -t "rhasspy/$(PACKAGE_NAME):$(version)"
+	docker build . -t "rhasspy/$(PACKAGE_NAME):$(version)" -t "rhasspy/$(PACKAGE_NAME):latest"
 
 deploy:
 	echo "$$DOCKER_PASSWORD" | docker login -u "$$DOCKER_USERNAME" --password-stdin

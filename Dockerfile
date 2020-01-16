@@ -5,7 +5,7 @@ ARG BUILD_ARCH=amd64
 # Install system dependencies
 RUN apt-get update && \
     apt-get install --no-install-recommends --yes \
-    libgfortran3
+    libgfortran3 sox
 
 # Install pre-built mitlm
 ADD mitlm-0.4.2-${BUILD_ARCH}.tar.gz /
