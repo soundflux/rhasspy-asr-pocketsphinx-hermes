@@ -1,12 +1,15 @@
 SHELL := bash
-PYTHON_FILES = rhasspyasr_pocketsphinx_hermes/*.py *.py
+PYTHON_NAME = rhasspyasr_pocketsphinx_hermes
+PACKAGE_NAME = rhasspy-asr-pocketsphinx-hermes
+SOURCE = $(PYTHON_NAME)
+PYTHON_FILES = $(SOURCE)/*.py *.py
 
 .PHONY: check venv dist sdist pyinstaller debian docker
 
 version := $(shell cat VERSION)
-architecture := $(shell dpkg-architecture | grep DEB_BUILD_ARCH= | sed 's/[^=]\+=//')
+architecture := $(shell bash architecture.sh)
 
-debian_package := rhasspy-asr-pocketsphinx-hermes_$(version)_$(architecture)
+debian_package := $(PACKAGE_NAME)_$(version)_$(architecture)
 debian_dir := debian/$(debian_package)
 
 check:
@@ -32,9 +35,9 @@ sdist:
 
 pyinstaller:
 	mkdir -p dist
-	pyinstaller -y --workpath pyinstaller/build --distpath pyinstaller/dist rhasspyasr_pocketsphinx_hermes.spec
-	cd pyinstaller/dist/rhasspyasr_pocketsphinx_hermes/ && rm -rf share notebook
-	tar -C pyinstaller/dist -czf dist/rhasspy-asr-pocketsphinx-hermes_$(version)_$(architecture).tar.gz rhasspyasr_pocketsphinx_hermes/
+	pyinstaller -y --workpath pyinstaller/build --distpath pyinstaller/dist $(PYTHON_NAME).spec
+	cd pyinstaller/dist/$(PYTHON_NAME)/ && rm -rf share notebook
+	tar -C pyinstaller/dist -czf dist/$(PACKAGE_NAME)_$(version)_$(architecture).tar.gz $(SOURCE)/
 
 debian: pyinstaller
 	mkdir -p dist
@@ -42,13 +45,13 @@ debian: pyinstaller
 	mkdir -p "$(debian_dir)/DEBIAN" "$(debian_dir)/usr/bin" "$(debian_dir)/usr/lib"
 	cat debian/DEBIAN/control | version=$(version) architecture=$(architecture) envsubst > "$(debian_dir)/DEBIAN/control"
 	cp debian/bin/* "$(debian_dir)/usr/bin/"
-	cp -R pyinstaller/dist/rhasspyasr_pocketsphinx_hermes "$(debian_dir)/usr/lib/"
+	cp -R pyinstaller/dist/$(PYTHON_NAME) "$(debian_dir)/usr/lib/"
 	cd debian/ && fakeroot dpkg --build "$(debian_package)"
 	mv "debian/$(debian_package).deb" dist/
 
 docker: pyinstaller
-	docker build . -t "rhasspy/rhasspy-asr-pocketsphinx-hermes:$(version)"
+	docker build . -t "rhasspy/$(PACKAGE_NAME):$(version)"
 
 deploy:
 	echo "$$DOCKER_PASSWORD" | docker login -u "$$DOCKER_USERNAME" --password-stdin
-	docker push rhasspy/rhasspy-asr-pocketsphinx:$(version)
+	docker push rhasspy/$(PACKAGE_NAME):$(version)

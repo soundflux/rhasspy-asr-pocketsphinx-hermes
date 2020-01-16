@@ -1,4 +1,4 @@
-"""Command-line interface to rhasspyasr-kaldi-hermes"""
+"""Command-line interface to rhasspyasr-asr-pocketsphinx-hermes"""
 import argparse
 import json
 import logging
@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def main():
     """Main method."""
-    parser = argparse.ArgumentParser(prog="rhasspyasr_pocketsphinx_hermes")
+    parser = argparse.ArgumentParser(prog="rhasspy-asr-pocketsphinx-hermes")
     parser.add_argument(
         "--acoustic-model",
         required=True,
