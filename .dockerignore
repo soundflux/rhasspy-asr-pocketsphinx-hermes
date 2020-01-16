@@ -1,3 +1,5 @@
 *
 !pyinstaller/dist
 !debian/bin
+!mitlm-0.4.2-*.tar.gz
+!phonetisaurus-2019-*.tar.gz

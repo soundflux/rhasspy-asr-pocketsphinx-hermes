@@ -31,6 +31,8 @@ Run the `bin/rhasspy-asr-pocketsphinx-hermes` script to access the command-line 
 bin/rhasspy-asr-pocketsphinx-hermes --help
 ```
 
+To re-train, you will also need to download pre-built binaries for [mitlm](https://github.com/synesthesiam/docker-mitlm) and [phonetisaurus](https://github.com/synesthesiam/docker-phonetisaurus), or build these programs yourself. The `estimate-ngram` and `phonetisaurus-apply` commands must be in your `PATH`.
+
 ## Building the Debian Package
 
 Follow the instructions to build from source, then run:
@@ -52,6 +54,8 @@ make docker
 ```
 
 This will create a Docker image tagged `rhasspy/rhasspy-asr-pocketsphinx-hermes:<VERSION>` where `VERSION` comes from the file of the same name in the source root directory.
+
+NOTE: If you add things to the Docker image, make sure to whitelist them in `.dockerignore`.
 
 ## Command-Line Options
 

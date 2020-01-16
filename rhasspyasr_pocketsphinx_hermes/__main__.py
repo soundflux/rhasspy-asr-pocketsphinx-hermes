@@ -62,6 +62,13 @@ def main():
         "--stdin-files", action="store_true", help="Read WAV file paths from stdin"
     )
     parser.add_argument(
+        "--g2p-model", help="Phonetisaurus FST model for guessing word pronunciations"
+    )
+    parser.add_argument(
+        "--train",
+        help="Generate dictionary and language model from intent JSON graph file",
+    )
+    parser.add_argument(
         "--debug", action="store_true", help="Print DEBUG messages to the console"
     )
     args = parser.parse_args()
@@ -94,6 +101,12 @@ def main():
         if args.base_dictionary:
             args.base_dictionary = [Path(p) for p in args.base_dictionary]
 
+        if args.train:
+            args.train = Path(args.train)
+
+        if args.g2p_model:
+            args.g2p_model = Path(args.g2p_model)
+
         transcriber = PocketsphinxTranscriber(
             args.acoustic_model,
             args.dictionary,
@@ -103,6 +116,7 @@ def main():
         )
 
         if args.stdin_files:
+            # Read WAV file(s) from stdin
             hermes = AsrHermesMqtt(client=None, transcriber=transcriber)
 
             for wav_path in sys.stdin:
@@ -116,6 +130,30 @@ def main():
                 assert isinstance(result, AsrTextCaptured)
                 json.dump(attr.asdict(result), sys.stdout)
                 print("")
+            return
+        elif args.train:
+            if not args.base_dictionary:
+                _LOGGER.warning(
+                    "You probably want to pass a base dictionary when re-training."
+                )
+
+            if not args.g2p_model:
+                _LOGGER.warning(
+                    "You probably want to pass a g2p model when re-training."
+                )
+
+            # Re-train ASR system
+            hermes = AsrHermesMqtt(
+                client=None,
+                transcriber=transcriber,
+                base_dictionaries=args.base_dictionary,
+                g2p_model=args.g2p_model,
+            )
+
+            _LOGGER.debug("Re-training from %s", args.train)
+            with open(args.train, "r") as json_file:
+                json_graph = json.load(json_file)
+                hermes.retrain(json_graph)
             return
 
         # Listen for messages

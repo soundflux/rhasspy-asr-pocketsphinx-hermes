@@ -4,4 +4,9 @@ if [[ -z "${rhasspyasr_pocketsphinx_hermes_dir}" ]]; then
     rhasspyasr_pocketsphinx_hermes_dir="${this_dir}/../lib/rhasspyasr_pocketsphinx_hermes"
 fi
 
+# Include mitlm and phonetisaurus
+export LD_LIBRARY_PATH="${rhasspyasr_pocketsphinx_hermes_dir}/mitlm/lib:${rhasspyasr_pocketsphinx_hermes_dir}/phonetisaurus/lib:${LD_LIBRARY_PATH}"
+export PATH="${rhasspyasr_pocketsphinx_hermes_dir}/mitlm/bin:${rhasspyasr_pocketsphinx_hermes_dir}/phonetisaurus/bin:${PATH}"
+
+# Run service
 "${rhasspyasr_pocketsphinx_hermes_dir}/rhasspyasr_pocketsphinx_hermes" "$@"
