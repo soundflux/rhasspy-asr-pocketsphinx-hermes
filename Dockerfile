@@ -3,8 +3,8 @@ FROM ${BUILD_ARCH}/debian:buster-slim
 ARG BUILD_ARCH=amd64
 
 # Install system dependencies
-RUN apt-get update
-RUN apt-get install --no-install-recommends --yes \
+RUN apt-get update && \
+    apt-get install --no-install-recommends --yes \
     libgfortran3
 
 # Install pre-built mitlm
