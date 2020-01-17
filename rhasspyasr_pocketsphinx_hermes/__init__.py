@@ -47,6 +47,15 @@ class MissingWordPronunciationsException(Exception):
         return f"Missing pronunciations for: {self.words}"
 
 
+@attr.s
+class SessionInfo:
+    """Information about an open session."""
+
+    sessionId: str = attr.ib()
+    recorder: VoiceCommandRecorder = attr.ib()
+    transcription_sent: bool = attr.ib(default=False)
+
+
 # -----------------------------------------------------------------------------
 
 
@@ -85,9 +94,7 @@ class AsrHermesMqtt:
         self.make_recorder = make_recorder or default_recorder
 
         # WAV buffers for each session
-        self.session_recorders: typing.Dict[str, VoiceCommandRecorder] = defaultdict(
-            VoiceCommandRecorder
-        )
+        self.sessions: typing.Dict[str, SessionInfo] = {}
 
         # Topic to listen for WAV chunks on
         self.audioframe_topics: typing.List[str] = []
@@ -100,22 +107,45 @@ class AsrHermesMqtt:
 
     def start_listening(self, message: AsrStartListening):
         """Start recording audio data for a session."""
-        if message.sessionId not in self.session_recorders:
-            self.session_recorders[message.sessionId] = self.make_recorder()
+        session = self.sessions.get(message.sessionId)
+        if not session:
+            session = SessionInfo(
+                sessionId=message.sessionId, recorder=self.make_recorder()
+            )
+            self.sessions[message.sessionId] = session
 
         # Start session
-        self.session_recorders[message.sessionId].start()
+        assert session
+        session.recorder.start()
         _LOGGER.debug("Starting listening (sessionId=%s)", message.sessionId)
         self.first_audio = True
 
-    def stop_listening(self, message: AsrStopListening):
+    def stop_listening(
+        self, message: AsrStopListening
+    ) -> typing.Iterable[typing.Union[AsrTextCaptured, AsrError]]:
         """Stop recording audio data for a session."""
-        if message.sessionId in self.session_recorders:
-            # Stop session
-            self.session_recorders[message.sessionId].stop()
-            self.session_recorders.pop(message.sessionId)
+        try:
+            session = self.sessions.pop(message.sessionId, None)
+            if session:
+                # Stop session
+                audio_data = session.recorder.stop()
+                if not session.transcription_sent and audio_data:
+                    # Send transcription
+                    session.transcription_sent = True
 
-        _LOGGER.debug("Stopping listening (sessionId=%s)", message.sessionId)
+                    yield self.transcribe(
+                        audio_data, siteId=message.siteId, sessionId=message.sessionId
+                    )
+
+            _LOGGER.debug("Stopping listening (sessionId=%s)", message.sessionId)
+        except Exception as e:
+            _LOGGER.exception("stop_listening")
+            yield AsrError(
+                error=str(e),
+                context=repr(self.transcriber),
+                siteId=message.siteId,
+                sessionId=message.sessionId,
+            )
 
     def handle_audio_frame(
         self, wav_bytes: bytes, siteId: str = "default"
@@ -124,9 +154,9 @@ class AsrHermesMqtt:
         audio_data = self.maybe_convert_wav(wav_bytes)
 
         # Add to every open session
-        for sessionId, recorder in self.session_recorders.items():
+        for sessionId, session in self.sessions.items():
             try:
-                command = recorder.process_chunk(audio_data)
+                command = session.recorder.process_chunk(audio_data)
                 if command and (command.result == VoiceCommandResult.SUCCESS):
                     assert command.audio_data is not None
                     _LOGGER.debug(
@@ -134,14 +164,18 @@ class AsrHermesMqtt:
                         sessionId,
                         len(command.audio_data),
                     )
+
+                    session.transcription_sent = True
+
                     yield self.transcribe(
                         command.audio_data, siteId=siteId, sessionId=sessionId
                     )
 
                     # Reset session (but keep open)
-                    recorder.stop()
-                    recorder.start()
+                    session.recorder.stop()
+                    session.recorder.start()
             except Exception as e:
+                _LOGGER.exception("handle_audio_frame")
                 yield AsrError(
                     error=str(e),
                     context=repr(self.transcriber),
@@ -417,7 +451,8 @@ class AsrHermesMqtt:
                 # hermes/asr/stopListening
                 json_payload = json.loads(msg.payload)
                 if self._check_siteId(json_payload):
-                    self.stop_listening(AsrStopListening(**json_payload))
+                    for result in self.stop_listening(AsrStopListening(**json_payload)):
+                        self.publish(result)
             else:
                 # rhasspy/asr/<siteId>/train
                 match = TRAIN_TOPIC_PATTERN.match(msg.topic)
