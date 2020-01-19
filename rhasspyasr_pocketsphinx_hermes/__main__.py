@@ -2,16 +2,17 @@
 import argparse
 import json
 import logging
-import threading
-import time
 import os
 import sys
+import threading
+import time
 import typing
 from pathlib import Path
 from uuid import uuid4
 
 import attr
 import paho.mqtt.client as mqtt
+
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
 from rhasspyhermes.asr import AsrTextCaptured
 
