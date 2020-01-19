@@ -2,13 +2,11 @@
 import io
 import json
 import logging
-import re
 import shutil
 import subprocess
 import tempfile
 import typing
 import wave
-from collections import defaultdict
 from pathlib import Path
 
 import attr
@@ -27,12 +25,9 @@ from rhasspyhermes.audioserver import AudioFrame
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
 
-from .messages import AsrError
+from .messages import AsrError, AsrTrain, AsrTrainSuccess
 
 _LOGGER = logging.getLogger(__name__)
-
-TRAIN_TOPIC = "rhasspy/asr/{siteId}/train"
-TRAIN_TOPIC_PATTERN = re.compile(r"^rhasspy/asr/([^/]+)/train$")
 
 # -----------------------------------------------------------------------------
 
@@ -224,13 +219,12 @@ class AsrHermesMqtt:
 
     # -------------------------------------------------------------------------
 
-    def retrain(
-        self, json_graph: typing.Dict[str, typing.Any], siteId: str = "default"
-    ):
-        """Re-generates language model and dictionary from JSON graph"""
+    def train(
+        self, train: AsrTrain, siteId: str = "default"
+    ) -> typing.Union[AsrTrainSuccess, AsrError]:
+        """Re-generates language model and dictionary from intent graph"""
         try:
-            _LOGGER.debug("Retraining")
-            graph = rhasspynlu.json_to_graph(json_graph)
+            graph = rhasspynlu.json_to_graph(train.graph_dict)
 
             # Generate counts
             intent_counts = rhasspynlu.get_intent_ngram_counts(graph)
@@ -368,9 +362,15 @@ class AsrHermesMqtt:
             # Force decoder to be reloaded on next use
             self.transcriber.decoder = None
 
-            _LOGGER.debug("Reloaded")
-        except Exception:
-            _LOGGER.exception("retrain")
+            return AsrTrainSuccess(id=train.id)
+        except Exception as e:
+            _LOGGER.exception("train")
+            return AsrError(
+                error=str(e),
+                context=repr(self.transcriber),
+                siteId=siteId,
+                sessionId=train.id,
+            )
 
     # -------------------------------------------------------------------------
 
@@ -394,11 +394,11 @@ class AsrHermesMqtt:
             if self.siteIds:
                 # Specific siteIds
                 topics.extend(
-                    [TRAIN_TOPIC.format(siteId=siteId) for siteId in self.siteIds]
+                    [AsrTrain.topic(siteId=siteId) for siteId in self.siteIds]
                 )
             else:
                 # All siteIds
-                topics.append(TRAIN_TOPIC.format(siteId="+"))
+                topics.append(AsrTrain.topic(siteId="+"))
 
             for topic in topics:
                 self.client.subscribe(topic)
@@ -453,13 +453,13 @@ class AsrHermesMqtt:
                 if self._check_siteId(json_payload):
                     for result in self.stop_listening(AsrStopListening(**json_payload)):
                         self.publish(result)
-            else:
+            elif AsrTrain.is_topic(msg.topic):
                 # rhasspy/asr/<siteId>/train
-                match = TRAIN_TOPIC_PATTERN.match(msg.topic)
-                if match:
-                    siteId = match.group(1)
-                    json_graph = json.loads(msg.payload)
-                    self.retrain(json_graph, siteId=siteId)
+                siteId = AsrTrain.get_siteId(msg.topic)
+                if (not self.siteIds) or (siteId in self.siteIds):
+                    json_payload = json.loads(msg.payload)
+                    result = self.train(AsrTrain(**json_payload), siteId=siteId)
+                    self.publish(result)
         except Exception:
             _LOGGER.exception("on_message")
 
