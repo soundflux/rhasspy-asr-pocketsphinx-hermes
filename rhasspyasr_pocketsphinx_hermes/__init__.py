@@ -15,16 +15,16 @@ import attr
 
 import rhasspyasr
 import rhasspynlu
-from rhasspyhermes.base import Message
+from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
 from rhasspyhermes.asr import (
     AsrStartListening,
     AsrStopListening,
     AsrTextCaptured,
-    AsrToggleOn,
     AsrToggleOff,
+    AsrToggleOn,
 )
 from rhasspyhermes.audioserver import AudioFrame
-from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
+from rhasspyhermes.base import Message
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
 
 from .messages import AsrError
