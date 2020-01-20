@@ -31,11 +31,12 @@ check:
 	yamllint .
 	pip list --outdated
 
-venv:
+venv: pocketsphinx-python.tar.gz
 	rm -rf .venv/
 	python3 -m venv .venv
 	.venv/bin/pip3 install --upgrade pip
 	.venv/bin/pip3 install wheel setuptools
+	.venv/bin/pip3 install pocketsphinx-python.tar.gz
 	.venv/bin/pip3 install -r requirements.txt
 	.venv/bin/pip3 install -r requirements_dev.txt
 
@@ -92,3 +93,7 @@ mitlm-0.4.2-$(architecture).tar.gz:
 # Download pre-built Phonetisaurus binaries.
 phonetisaurus-2019-$(architecture).tar.gz:
 	curl -sSfL -o $@ "https://github.com/synesthesiam/docker-phonetisaurus/releases/download/v2019.1/phonetisaurus-2019-$(architecture).tar.gz"
+
+# Download Python Pocketsphinx library with no dependency on PulseAudio.
+pocketsphinx-python.tar.gz:
+	curl -sSfL -o $@ 'https://github.com/synesthesiam/pocketsphinx-python/releases/download/v1.0/pocketsphinx-python.tar.gz'

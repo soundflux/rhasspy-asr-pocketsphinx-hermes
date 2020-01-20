@@ -12,7 +12,6 @@ from uuid import uuid4
 
 import attr
 import paho.mqtt.client as mqtt
-
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
 from rhasspyhermes.asr import AsrTextCaptured
 
@@ -136,7 +135,8 @@ def main():
                 json.dump(attr.asdict(result), sys.stdout)
                 print("")
             return
-        elif args.train:
+
+        if args.train:
             assert args.graph, "Graph JSON file required (--graph)"
 
             # Do training and exit

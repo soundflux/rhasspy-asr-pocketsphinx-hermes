@@ -3,7 +3,6 @@ import re
 import typing
 
 import attr
-
 from rhasspyhermes.base import Message
 
 

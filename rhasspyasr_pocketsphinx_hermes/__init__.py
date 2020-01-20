@@ -10,8 +10,7 @@ import wave
 from pathlib import Path
 
 import attr
-
-import rhasspyasr
+import rhasspyasr.utils
 import rhasspynlu
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
 from rhasspyhermes.asr import (
@@ -36,6 +35,7 @@ class MissingWordPronunciationsException(Exception):
     """Raised when missing word pronunciations and no g2p model."""
 
     def __init__(self, words: typing.List[str]):
+        super().__init__(self)
         self.words = words
 
     def __repr__(self):
@@ -68,7 +68,7 @@ class AsrHermesMqtt:
         sample_rate: int = 16000,
         sample_width: int = 2,
         channels: int = 1,
-        make_recorder: typing.Callable[[None], VoiceCommandRecorder] = None,
+        make_recorder: typing.Callable[[], VoiceCommandRecorder] = None,
     ):
         self.client = client
         self.transcriber = transcriber
@@ -105,7 +105,7 @@ class AsrHermesMqtt:
         session = self.sessions.get(message.sessionId)
         if not session:
             session = SessionInfo(
-                sessionId=message.sessionId, recorder=self.make_recorder()
+                sessionId=message.sessionId, recorder=self.make_recorder(),
             )
             self.sessions[message.sessionId] = session
 
@@ -229,6 +229,7 @@ class AsrHermesMqtt:
             # Generate counts
             intent_counts = rhasspynlu.get_intent_ngram_counts(graph)
 
+            # pylint: disable=W0511
             # TODO: Balance counts
 
             # Use mitlm to create language model
@@ -277,7 +278,7 @@ class AsrHermesMqtt:
                     for base_dict_path in self.base_dictionaries:
                         _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
                         with open(base_dict_path, "r") as base_dict_file:
-                            rhasspyasr.read_dict(
+                            rhasspyasr.utils.read_dict(
                                 base_dict_file, word_dict=pronunciations
                             )
 
@@ -306,40 +307,39 @@ class AsrHermesMqtt:
                                 raise MissingWordPronunciationsException(
                                     list(missing_words)
                                 )
-                            else:
-                                # Guess word pronunciations
-                                _LOGGER.debug(
-                                    "Guessing pronunciations for %s", missing_words
-                                )
-                                with tempfile.NamedTemporaryFile(
-                                    mode="w"
-                                ) as wordlist_file:
-                                    # TODO: Handle casing
-                                    for word in missing_words:
-                                        print(word, file=wordlist_file)
 
-                                    wordlist_file.seek(0)
-                                    g2p_command = [
-                                        "phonetisaurus-apply",
-                                        "--model",
-                                        str(self.g2p_model),
-                                        "--word_list",
-                                        wordlist_file.name,
-                                        "--nbest",
-                                        "1",
-                                    ]
+                            # Guess word pronunciations
+                            _LOGGER.debug(
+                                "Guessing pronunciations for %s", missing_words
+                            )
+                            with tempfile.NamedTemporaryFile(mode="w") as wordlist_file:
+                                # pylint: disable=W0511
+                                # TODO: Handle casing
+                                for word in missing_words:
+                                    print(word, file=wordlist_file)
 
-                                    _LOGGER.debug(g2p_command)
-                                    g2p_lines = subprocess.check_output(
-                                        g2p_command, universal_newlines=True
-                                    ).splitlines()
-                                    for line in g2p_lines:
-                                        line = line.strip()
-                                        if line:
-                                            parts = line.split()
-                                            word = parts[0].strip()
-                                            phonemes = " ".join(parts[1:]).strip()
-                                            print(word, phonemes, file=dict_file)
+                                wordlist_file.seek(0)
+                                g2p_command = [
+                                    "phonetisaurus-apply",
+                                    "--model",
+                                    str(self.g2p_model),
+                                    "--word_list",
+                                    wordlist_file.name,
+                                    "--nbest",
+                                    "1",
+                                ]
+
+                                _LOGGER.debug(g2p_command)
+                                g2p_lines = subprocess.check_output(
+                                    g2p_command, universal_newlines=True
+                                ).splitlines()
+                                for line in g2p_lines:
+                                    line = line.strip()
+                                    if line:
+                                        parts = line.split()
+                                        word = parts[0].strip()
+                                        phonemes = " ".join(parts[1:]).strip()
+                                        print(word, phonemes, file=dict_file)
 
                         # -----------------------------------------------------
 

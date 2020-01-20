@@ -1,3 +1,4 @@
+"""Setup for rhasspyasr_pocketsphinx_hermes"""
 import os
 
 import setuptools
@@ -17,7 +18,7 @@ setuptools.setup(
     version=version,
     author="Michael Hansen",
     author_email="hansen.mike@gmail.com",
-    url="https://github.com/synesthesiam/rhasspy-asr-pocketsphinx-hermes",
+    url="https://github.com/rhasspy/rhasspy-asr-pocketsphinx-hermes",
     packages=setuptools.find_packages(),
     install_requires=requirements,
     classifiers=[
