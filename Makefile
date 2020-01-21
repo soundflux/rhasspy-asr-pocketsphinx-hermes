@@ -52,7 +52,7 @@ sdist:
 # Docker
 # -----------------------------------------------------------------------------
 
-docker: pyinstaller mitlm-0.4.2-$(architecture).tar.gz
+docker: pyinstaller mitlm-0.4.2-$(architecture).tar.gz phonetisaurus-2019-$(architecture).tar.gz
 	docker build . -t "rhasspy/$(PACKAGE_NAME):$(version)" -t "rhasspy/$(PACKAGE_NAME):latest"
 
 deploy:
