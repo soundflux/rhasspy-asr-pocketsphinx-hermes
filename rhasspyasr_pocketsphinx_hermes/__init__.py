@@ -42,13 +42,13 @@ class MissingWordPronunciationsException(Exception):
         return f"Missing pronunciations for: {self.words}"
 
 
-@attr.s
+@attr.s(auto_attribs=True)
 class SessionInfo:
     """Information about an open session."""
 
-    sessionId: str = attr.ib()
-    recorder: VoiceCommandRecorder = attr.ib()
-    transcription_sent: bool = attr.ib(default=False)
+    sessionId: str
+    recorder: VoiceCommandRecorder
+    transcription_sent: bool = False
 
 
 # -----------------------------------------------------------------------------
