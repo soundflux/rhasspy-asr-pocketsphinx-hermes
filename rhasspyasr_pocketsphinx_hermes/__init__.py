@@ -10,36 +10,25 @@ import wave
 from pathlib import Path
 
 import attr
-import rhasspyasr.utils
-import rhasspynlu
-from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
+from rhasspyasr import Transcriber
+import rhasspyasr_pocketsphinx
 from rhasspyhermes.asr import (
     AsrStartListening,
     AsrStopListening,
     AsrTextCaptured,
     AsrToggleOff,
     AsrToggleOn,
+    AsrError,
+    AsrTrain,
+    AsrTrainSuccess,
 )
 from rhasspyhermes.audioserver import AudioFrame
 from rhasspyhermes.base import Message
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
 
-from .messages import AsrError, AsrTrain, AsrTrainSuccess
-
 _LOGGER = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
-
-
-class MissingWordPronunciationsException(Exception):
-    """Raised when missing word pronunciations and no g2p model."""
-
-    def __init__(self, words: typing.List[str]):
-        super().__init__(self)
-        self.words = words
-
-    def __repr__(self):
-        return f"Missing pronunciations for: {self.words}"
 
 
 @attr.s
@@ -60,9 +49,13 @@ class AsrHermesMqtt:
     def __init__(
         self,
         client,
-        transcriber: PocketsphinxTranscriber,
+        transcriber_factory: typing.Callable[[], Transcriber],
+        dictionary: Path,
+        language_model: Path,
         base_dictionaries: typing.Optional[typing.List[Path]] = None,
+        dictionary_word_transform: typing.Optional[typing.Callable[[str], str]] = None,
         g2p_model: typing.Optional[Path] = None,
+        g2p_word_transform: typing.Optional[typing.Callable[[str], str]] = None,
         siteIds: typing.Optional[typing.List[str]] = None,
         enabled: bool = True,
         sample_rate: int = 16000,
@@ -71,9 +64,14 @@ class AsrHermesMqtt:
         make_recorder: typing.Callable[[], VoiceCommandRecorder] = None,
     ):
         self.client = client
-        self.transcriber = transcriber
+        self.make_transcriber = transcriber_factory
+        self.transcriber = None
+        self.dictionary = dictionary
+        self.language_model = language_model
         self.base_dictionaries = base_dictionaries or []
+        self.dictionary_word_transform = dictionary_word_transform
         self.g2p_model = g2p_model
+        self.g2p_word_transform = g2p_word_transform
         self.siteIds = siteIds or []
         self.enabled = enabled
 
@@ -105,7 +103,7 @@ class AsrHermesMqtt:
         session = self.sessions.get(message.sessionId)
         if not session:
             session = SessionInfo(
-                sessionId=message.sessionId, recorder=self.make_recorder(),
+                sessionId=message.sessionId, recorder=self.make_recorder()
             )
             self.sessions[message.sessionId] = session
 
@@ -183,6 +181,9 @@ class AsrHermesMqtt:
     ) -> typing.Union[AsrTextCaptured, AsrError]:
         """Transcribe audio data and publish captured text."""
         try:
+            if not self.transcriber:
+                self.transcriber = self.make_transcriber()
+
             with io.BytesIO() as wav_buffer:
                 wav_file: wave.Wave_write = wave.open(wav_buffer, mode="wb")
                 with wav_file:
@@ -217,154 +218,33 @@ class AsrHermesMqtt:
                 sessionId=sessionId,
             )
 
-    # -------------------------------------------------------------------------
-
-    def train(
+    def handle_train(
         self, train: AsrTrain, siteId: str = "default"
     ) -> typing.Union[AsrTrainSuccess, AsrError]:
-        """Re-generates language model and dictionary from intent graph"""
+        """Re-trains ASR system"""
         try:
-            graph = rhasspynlu.json_to_graph(train.graph_dict)
-
-            # Generate counts
-            intent_counts = rhasspynlu.get_intent_ngram_counts(graph)
-
-            # pylint: disable=W0511
-            # TODO: Balance counts
-
-            # Use mitlm to create language model
-            vocabulary: typing.Set[str] = set()
-
-            with tempfile.NamedTemporaryFile(mode="w") as lm_file:
-
-                # Create ngram counts
-                with tempfile.NamedTemporaryFile(mode="w") as count_file:
-                    for intent_name in intent_counts:
-                        for ngram, count in intent_counts[intent_name].items():
-                            # word [word] ... <TAB> count
-                            print(*ngram, file=count_file, end="")
-                            print("\t", count, file=count_file)
-
-                    count_file.seek(0)
-                    with tempfile.NamedTemporaryFile(mode="w+") as vocab_file:
-                        ngram_command = [
-                            "estimate-ngram",
-                            "-order",
-                            "3",
-                            "-counts",
-                            count_file.name,
-                            "-write-lm",
-                            lm_file.name,
-                            "-write-vocab",
-                            vocab_file.name,
-                        ]
-
-                        _LOGGER.debug(ngram_command)
-                        subprocess.check_call(ngram_command)
-
-                        # Extract vocabulary
-                        vocab_file.seek(0)
-                        for line in vocab_file:
-                            line = line.strip()
-                            if not line.startswith("<"):
-                                vocabulary.add(line)
-
-                # Write dictionary
-                if vocabulary:
-
-                    # Load base dictionaries
-                    pronunciations: typing.Dict[str, typing.List[str]] = {}
-
-                    for base_dict_path in self.base_dictionaries:
-                        _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
-                        with open(base_dict_path, "r") as base_dict_file:
-                            rhasspyasr.utils.read_dict(
-                                base_dict_file, word_dict=pronunciations
-                            )
-
-                    with tempfile.NamedTemporaryFile(mode="w") as dict_file:
-                        missing_words: typing.Set[str] = set()
-
-                        # Look up each word
-                        for word in vocabulary:
-                            word_phonemes = pronunciations.get(word)
-                            if not word_phonemes:
-                                # Add to missing word list
-                                _LOGGER.warning("Missing word '%s'", word)
-                                missing_words.add(word)
-                                continue
-
-                            # Write CMU format
-                            for i, phonemes in enumerate(word_phonemes):
-                                if i == 0:
-                                    print(word, phonemes, file=dict_file)
-                                else:
-                                    print(f"{word}({i+1})", phonemes, file=dict_file)
-
-                        if missing_words:
-                            # Fail if no g2p model is available
-                            if not self.g2p_model:
-                                raise MissingWordPronunciationsException(
-                                    list(missing_words)
-                                )
-
-                            # Guess word pronunciations
-                            _LOGGER.debug(
-                                "Guessing pronunciations for %s", missing_words
-                            )
-                            with tempfile.NamedTemporaryFile(mode="w") as wordlist_file:
-                                # pylint: disable=W0511
-                                # TODO: Handle casing
-                                for word in missing_words:
-                                    print(word, file=wordlist_file)
-
-                                wordlist_file.seek(0)
-                                g2p_command = [
-                                    "phonetisaurus-apply",
-                                    "--model",
-                                    str(self.g2p_model),
-                                    "--word_list",
-                                    wordlist_file.name,
-                                    "--nbest",
-                                    "1",
-                                ]
-
-                                _LOGGER.debug(g2p_command)
-                                g2p_lines = subprocess.check_output(
-                                    g2p_command, universal_newlines=True
-                                ).splitlines()
-                                for line in g2p_lines:
-                                    line = line.strip()
-                                    if line:
-                                        parts = line.split()
-                                        word = parts[0].strip()
-                                        phonemes = " ".join(parts[1:]).strip()
-                                        print(word, phonemes, file=dict_file)
-
-                        # -----------------------------------------------------
-
-                        # Copy dictionary
-                        dict_file.seek(0)
-                        shutil.copy(dict_file.name, self.transcriber.dictionary)
-                        _LOGGER.debug(
-                            "Wrote dictionary to %s", str(self.transcriber.dictionary)
-                        )
-
-                # -------------------------------------------------------------
-
-                # Copy language model
-                lm_file.seek(0)
-                shutil.copy(lm_file.name, self.transcriber.language_model)
-                _LOGGER.debug(
-                    "Wrote language model to %s", str(self.transcriber.language_model)
+            if not self.base_dictionaries:
+                _LOGGER.warning(
+                    "No base dictionaries provided. Training will likely fail."
                 )
 
-            # Force decoder to be reloaded on next use
-            self.transcriber.decoder = None
+            # Generate dictionary/language model
+            rhasspyasr_pocketsphinx.train(
+                train.graph_dict,
+                self.dictionary,
+                self.language_model,
+                self.base_dictionaries,
+                dictionary_word_transform=self.dictionary_word_transform,
+                g2p_model=self.g2p_model,
+                g2p_word_transform=self.g2p_word_transform,
+            )
+
+            _LOGGER.debug("Re-loading transcriber")
+            self.transcriber = self.make_transcriber()
 
             return AsrTrainSuccess(id=train.id)
         except Exception as e:
-            _LOGGER.exception("train")
+            _LOGGER.exception("handle_train")
             return AsrError(
                 error=str(e),
                 context=repr(self.transcriber),
@@ -458,7 +338,7 @@ class AsrHermesMqtt:
                 siteId = AsrTrain.get_siteId(msg.topic)
                 if (not self.siteIds) or (siteId in self.siteIds):
                     json_payload = json.loads(msg.payload)
-                    result = self.train(AsrTrain(**json_payload), siteId=siteId)
+                    result = self.handle_train(AsrTrain(**json_payload), siteId=siteId)
                     self.publish(result)
         except Exception:
             _LOGGER.exception("on_message")
