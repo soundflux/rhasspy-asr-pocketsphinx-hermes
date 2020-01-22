@@ -1,0 +1,27 @@
+---
+name: Update repository
+
+on: push
+
+jobs:
+  update:
+    runs-on: ubuntu-18.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          path: main
+      - name: Checkout template repository
+        uses: actions/checkout@v2
+        with:
+          repository: rhasspy/rhasspy-python-template
+          path: template
+      - name: Copy files from template
+        run: rsync -rv --exclude=.git template/ main
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: main
+          commit-message: Update from rhasspy-python-template
+          title: Update from rhasspy-python-template
