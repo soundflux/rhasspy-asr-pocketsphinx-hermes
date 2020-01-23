@@ -25,3 +25,5 @@ jobs:
           path: main
           commit-message: Update from rhasspy-python-template
           title: Update from rhasspy-python-template
+          body: |
+            Update files from [rhasspy-python-template](https://github.com/rhasspy/rhasspy-python-template)
