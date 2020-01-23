@@ -23,6 +23,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           path: main
+          branch: update-from-rhasspy-python-template
           commit-message: Update from rhasspy-python-template
           title: Update from rhasspy-python-template
           body: |
