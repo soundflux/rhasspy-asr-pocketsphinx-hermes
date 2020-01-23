@@ -3,18 +3,16 @@ import argparse
 import json
 import logging
 import os
-import sys
 import threading
 import time
 import typing
 from pathlib import Path
 from uuid import uuid4
 
-import attr
 import paho.mqtt.client as mqtt
 import rhasspyasr_pocketsphinx
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
-from rhasspyhermes.asr import AsrTextCaptured, AsrTrain
+from rhasspyhermes.asr import AsrTrain
 
 from . import AsrHermesMqtt
 
@@ -205,6 +203,7 @@ def run_mqtt(args: argparse.Namespace):
             base_dictionaries=args.base_dictionary,
             siteIds=args.siteId,
             dictionary_word_transform=get_word_transform(args.dictionary_casing),
+            g2p_model=args.g2p_model,
             g2p_word_transform=get_word_transform(args.g2p_casing),
         )
 
@@ -282,7 +281,8 @@ def get_word_transform(name: str) -> typing.Callable[[str], str]:
     """Gets a word transformation function by name."""
     if name == "upper":
         return str.upper
-    elif name == "lower":
+
+    if name == "lower":
         return str.lower
 
     return lambda s: s

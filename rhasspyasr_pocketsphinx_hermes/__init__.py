@@ -2,28 +2,27 @@
 import io
 import json
 import logging
-import shutil
 import subprocess
-import tempfile
 import typing
 import wave
 from pathlib import Path
 
 import attr
-from rhasspyasr import Transcriber
 import rhasspyasr_pocketsphinx
+from rhasspyasr import Transcriber
 from rhasspyhermes.asr import (
+    AsrError,
     AsrStartListening,
     AsrStopListening,
     AsrTextCaptured,
     AsrToggleOff,
     AsrToggleOn,
-    AsrError,
     AsrTrain,
     AsrTrainSuccess,
 )
 from rhasspyhermes.audioserver import AudioFrame
 from rhasspyhermes.base import Message
+from rhasspyhermes.g2p import G2pError, G2pPhonemes, G2pPronounce, G2pPronunciation
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,7 +64,7 @@ class AsrHermesMqtt:
     ):
         self.client = client
         self.make_transcriber = transcriber_factory
-        self.transcriber = None
+        self.transcriber: typing.Optional[Transcriber] = None
         self.dictionary = dictionary
         self.language_model = language_model
         self.base_dictionaries = base_dictionaries or []
@@ -252,6 +251,76 @@ class AsrHermesMqtt:
                 sessionId=train.id,
             )
 
+    def handle_pronounce(
+        self, pronounce: G2pPronounce
+    ) -> typing.Union[G2pPhonemes, G2pError]:
+        """Looks up or guesses word pronunciation(s)."""
+        try:
+            result = G2pPhonemes(
+                id=pronounce.id, siteId=pronounce.siteId, sessionId=pronounce.sessionId
+            )
+
+            # Load base dictionaries
+            pronunciations: typing.Dict[str, typing.List[typing.List[str]]] = {}
+
+            for base_dict_path in self.base_dictionaries:
+                _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
+                with open(base_dict_path, "r") as base_dict_file:
+                    rhasspyasr_pocketsphinx.read_dict(
+                        base_dict_file, word_dict=pronunciations
+                    )
+
+            # Try to look up in dictionary first
+            missing_words: typing.Set[str] = set()
+            if pronunciations:
+                for word in pronounce.words:
+                    # Handle case transformation
+                    if self.dictionary_word_transform:
+                        word = self.dictionary_word_transform(word)
+
+                    word_prons = pronunciations.get(word)
+                    if word_prons:
+                        # Use dictionary pronunciations
+                        result.phonemes[word] = [
+                            G2pPronunciation(word=word, phonemes=p) for p in word_prons
+                        ]
+                    else:
+                        # Will have to guess later
+                        missing_words.add(word)
+            else:
+                # All words must be guessed
+                missing_words.update(pronounce.words)
+
+            if missing_words:
+                if self.g2p_model:
+                    _LOGGER.debug("Guessing pronunciations of %s", missing_words)
+                    guesses = rhasspyasr_pocketsphinx.guess_pronunciations(
+                        missing_words,
+                        self.g2p_model,
+                        g2p_word_transform=self.g2p_word_transform,
+                        num_guesses=pronounce.numGuesses,
+                    )
+
+                    # Add guesses to result
+                    for guess_word, guess_phonemes in guesses:
+                        result_phonemes = result.phonemes.get(guess_word) or []
+                        result_phonemes.append(
+                            G2pPronunciation(word=guess_word, phonemes=guess_phonemes)
+                        )
+                        result.phonemes[guess_word] = result_phonemes
+                else:
+                    _LOGGER.warning("No g2p model. Cannot guess pronunciations.")
+
+            return result
+        except Exception as e:
+            _LOGGER.exception("handle_pronounce")
+            return G2pError(
+                error=str(e),
+                context=repr(self.transcriber),
+                siteId=pronounce.siteId,
+                sessionId=pronounce.id,
+            )
+
     # -------------------------------------------------------------------------
 
     def on_connect(self, client, userdata, flags, rc):
@@ -262,6 +331,7 @@ class AsrHermesMqtt:
                 AsrToggleOff.topic(),
                 AsrStartListening.topic(),
                 AsrStopListening.topic(),
+                G2pPronounce.topic(),
             ]
 
             if self.audioframe_topics:
@@ -339,6 +409,12 @@ class AsrHermesMqtt:
                 if (not self.siteIds) or (siteId in self.siteIds):
                     json_payload = json.loads(msg.payload)
                     result = self.handle_train(AsrTrain(**json_payload), siteId=siteId)
+                    self.publish(result)
+            elif msg.topic == G2pPronounce.topic():
+                # rhasspy/g2p/pronounce
+                json_payload = json.loads(msg.payload or "{}")
+                if self._check_siteId(json_payload):
+                    result = self.handle_pronounce(G2pPronounce(**json_payload))
                     self.publish(result)
         except Exception:
             _LOGGER.exception("on_message")
