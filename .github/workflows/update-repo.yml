@@ -16,8 +16,8 @@ jobs:
         with:
           repository: rhasspy/rhasspy-python-template
           path: template
-      - name: Copy files from template
-        run: rsync -av --exclude=.git template/ main
+      - name: Update repository from template
+        uses: rhasspy/rhasspy-update-repo-action@master
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v2
         with:
