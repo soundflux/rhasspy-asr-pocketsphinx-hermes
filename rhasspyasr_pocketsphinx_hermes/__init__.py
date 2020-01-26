@@ -30,13 +30,13 @@ _LOGGER = logging.getLogger(__name__)
 # -----------------------------------------------------------------------------
 
 
-@attr.s
+@attr.s(auto_attribs=True)
 class SessionInfo:
     """Information about an open session."""
 
-    sessionId: str = attr.ib()
-    recorder: VoiceCommandRecorder = attr.ib()
-    transcription_sent: bool = attr.ib(default=False)
+    sessionId: str
+    recorder: VoiceCommandRecorder
+    transcription_sent: bool = False
 
 
 # -----------------------------------------------------------------------------
@@ -89,9 +89,9 @@ class AsrHermesMqtt:
         self.sessions: typing.Dict[str, SessionInfo] = {}
 
         # Topic to listen for WAV chunks on
-        self.audioframe_topics: typing.List[str] = []
-        for siteId in self.siteIds:
-            self.audioframe_topics.append(AudioFrame.topic(siteId=siteId))
+        self.audioframe_topics: typing.List[str] = [
+            AudioFrame.topic(siteId=siteId) for siteId in self.siteIds
+        ]
 
         self.first_audio: bool = True
 
@@ -225,6 +225,138 @@ class AsrHermesMqtt:
             if not self.base_dictionaries:
                 _LOGGER.warning(
                     "No base dictionaries provided. Training will likely fail."
+                )
+
+            graph = rhasspynlu.json_to_graph(train.graph_dict)
+
+            # Generate counts
+            intent_counts = rhasspynlu.get_intent_ngram_counts(graph)
+
+            # pylint: disable=W0511
+            # TODO: Balance counts
+
+            # Use mitlm to create language model
+            vocabulary: typing.Set[str] = set()
+
+            with tempfile.NamedTemporaryFile(mode="w") as lm_file:
+
+                # Create ngram counts
+                with tempfile.NamedTemporaryFile(mode="w") as count_file:
+                    for ngram_count in intent_counts.values():
+                        for ngram, count in ngram_count.items():
+                            # word [word] ... <TAB> count
+                            print(*ngram, "\t", count, file=count_file)
+
+                    count_file.seek(0)
+                    with tempfile.NamedTemporaryFile(mode="w+") as vocab_file:
+                        ngram_command = [
+                            "estimate-ngram",
+                            "-order",
+                            "3",
+                            "-counts",
+                            count_file.name,
+                            "-write-lm",
+                            lm_file.name,
+                            "-write-vocab",
+                            vocab_file.name,
+                        ]
+
+                        _LOGGER.debug(ngram_command)
+                        subprocess.check_call(ngram_command)
+
+                        # Extract vocabulary
+                        vocab_file.seek(0)
+                        for line in vocab_file:
+                            line = line.strip()
+                            if not line.startswith("<"):
+                                vocabulary.add(line)
+
+                # Write dictionary
+                if vocabulary:
+
+                    # Load base dictionaries
+                    pronunciations: typing.Dict[str, typing.List[str]] = {}
+
+                    for base_dict_path in self.base_dictionaries:
+                        _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
+                        with open(base_dict_path, "r") as base_dict_file:
+                            rhasspyasr.utils.read_dict(
+                                base_dict_file, word_dict=pronunciations
+                            )
+
+                    with tempfile.NamedTemporaryFile(mode="w") as dict_file:
+                        missing_words: typing.Set[str] = set()
+
+                        # Look up each word
+                        for word in vocabulary:
+                            word_phonemes = pronunciations.get(word)
+                            if not word_phonemes:
+                                # Add to missing word list
+                                _LOGGER.warning("Missing word '%s'", word)
+                                missing_words.add(word)
+                                continue
+
+                            # Write CMU format
+                            for i, phonemes in enumerate(word_phonemes):
+                                if i == 0:
+                                    print(word, phonemes, file=dict_file)
+                                else:
+                                    print(f"{word}({i+1})", phonemes, file=dict_file)
+
+                        if missing_words:
+                            # Fail if no g2p model is available
+                            if not self.g2p_model:
+                                raise MissingWordPronunciationsException(
+                                    list(missing_words)
+                                )
+
+                            # Guess word pronunciations
+                            _LOGGER.debug(
+                                "Guessing pronunciations for %s", missing_words
+                            )
+                            with tempfile.NamedTemporaryFile(mode="w") as wordlist_file:
+                                # pylint: disable=W0511
+                                # TODO: Handle casing
+                                print(*missing_words, file=wordlist_file, sep="\n")
+
+                                wordlist_file.seek(0)
+                                g2p_command = [
+                                    "phonetisaurus-apply",
+                                    "--model",
+                                    str(self.g2p_model),
+                                    "--word_list",
+                                    wordlist_file.name,
+                                    "--nbest",
+                                    "1",
+                                ]
+
+                                _LOGGER.debug(g2p_command)
+                                g2p_lines = subprocess.check_output(
+                                    g2p_command, universal_newlines=True
+                                ).splitlines()
+                                for line in g2p_lines:
+                                    line = line.strip()
+                                    if line:
+                                        word, *parts = line.split()
+                                        phonemes = " ".join(parts).strip()
+                                        print(word.strip(), phonemes, file=dict_file)
+
+                        # -----------------------------------------------------
+
+                        # Copy dictionary
+                        dict_file.seek(0)
+                        shutil.copy(dict_file.name, self.transcriber.dictionary)
+                        _LOGGER.debug(
+                            "Wrote dictionary to %s", str(self.transcriber.dictionary)
+                        )
+
+                # -------------------------------------------------------------
+
+                # Copy language model
+                lm_file.seek(0)
+                shutil.copy(lm_file.name, self.transcriber.language_model)
+                _LOGGER.debug(
+                    "Wrote language model to %s", str(self.transcriber.language_model)
                 )
 
             # Generate dictionary/language model
