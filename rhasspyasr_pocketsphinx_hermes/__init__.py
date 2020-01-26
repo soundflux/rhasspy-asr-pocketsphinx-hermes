@@ -92,9 +92,9 @@ class AsrHermesMqtt:
         self.sessions: typing.Dict[str, SessionInfo] = {}
 
         # Topic to listen for WAV chunks on
-        self.audioframe_topics: typing.List[str] = []
-        for siteId in self.siteIds:
-            self.audioframe_topics.append(AudioFrame.topic(siteId=siteId))
+        self.audioframe_topics: typing.List[str] = [
+            AudioFrame.topic(siteId=siteId) for siteId in self.siteIds
+        ]
 
         self.first_audio: bool = True
 
@@ -239,11 +239,10 @@ class AsrHermesMqtt:
 
                 # Create ngram counts
                 with tempfile.NamedTemporaryFile(mode="w") as count_file:
-                    for intent_name in intent_counts:
-                        for ngram, count in intent_counts[intent_name].items():
+                    for ngram_count in intent_counts.values():
+                        for ngram, count in ngram_count.items():
                             # word [word] ... <TAB> count
-                            print(*ngram, file=count_file, end="")
-                            print("\t", count, file=count_file)
+                            print(*ngram, "\t", count, file=count_file)
 
                     count_file.seek(0)
                     with tempfile.NamedTemporaryFile(mode="w+") as vocab_file:
@@ -315,8 +314,7 @@ class AsrHermesMqtt:
                             with tempfile.NamedTemporaryFile(mode="w") as wordlist_file:
                                 # pylint: disable=W0511
                                 # TODO: Handle casing
-                                for word in missing_words:
-                                    print(word, file=wordlist_file)
+                                print(*missing_words, file=wordlist_file, sep="\n")
 
                                 wordlist_file.seek(0)
                                 g2p_command = [
@@ -336,10 +334,9 @@ class AsrHermesMqtt:
                                 for line in g2p_lines:
                                     line = line.strip()
                                     if line:
-                                        parts = line.split()
-                                        word = parts[0].strip()
-                                        phonemes = " ".join(parts[1:]).strip()
-                                        print(word, phonemes, file=dict_file)
+                                        word, *parts = line.split()
+                                        phonemes = " ".join(parts).strip()
+                                        print(word.strip(), phonemes, file=dict_file)
 
                         # -----------------------------------------------------
 
