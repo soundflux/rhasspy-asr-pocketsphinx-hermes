@@ -3,7 +3,7 @@
 [![Continous Integration](https://github.com/rhasspy/rhasspy-asr-pocketsphinx-hermes/workflows/Tests/badge.svg)](https://github.com/rhasspy/rhasspy-asr-pocketsphinx-hermes/actions)
 [![GitHub license](https://img.shields.io/github/license/rhasspy/rhasspy-asr-pocketsphinx-hermes.svg)](https://github.com/rhasspy/rhasspy-asr-pocketsphinx-hermes/blob/master/LICENSE)
 
-Implements `hermes/asr` functionality from [Hermes protocol](https://docs.snips.ai/reference/hermes) using [rhasspy-asr-pocketsphinx](https://github.com/synesthesiam/rhasspy-asr-pocketsphinx).
+Implements `hermes/asr` functionality from [Hermes protocol](https://docs.snips.ai/reference/hermes) using [rhasspy-asr-pocketsphinx](https://github.com/rhasspy/rhasspy-asr-pocketsphinx).
 
 ## Running With Docker
 
