@@ -281,8 +281,9 @@ class AsrHermesMqtt:
                     word_prons = pronunciations.get(word)
                     if word_prons:
                         # Use dictionary pronunciations
-                        result.phonemes[word] = [
-                            G2pPronunciation(word=word, phonemes=p) for p in word_prons
+                        result.wordPhonemes[word] = [
+                            G2pPronunciation(phonemes=p, guessed=False)
+                            for p in word_prons
                         ]
                     else:
                         # Will have to guess later
@@ -303,11 +304,11 @@ class AsrHermesMqtt:
 
                     # Add guesses to result
                     for guess_word, guess_phonemes in guesses:
-                        result_phonemes = result.phonemes.get(guess_word) or []
+                        result_phonemes = result.wordPhonemes.get(guess_word) or []
                         result_phonemes.append(
-                            G2pPronunciation(word=guess_word, phonemes=guess_phonemes)
+                            G2pPronunciation(phonemes=guess_phonemes, guessed=True)
                         )
-                        result.phonemes[guess_word] = result_phonemes
+                        result.wordPhonemes[guess_word] = result_phonemes
                 else:
                     _LOGGER.warning("No g2p model. Cannot guess pronunciations.")
 
