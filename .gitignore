@@ -6,7 +6,5 @@ dist/
 *.egg-info/
 pyinstaller/
 etc/test/cmusphinx-en-us-ptm-5.2/
-mitlm-0.4.2-*.tar.gz
-phonetisaurus-2019-*.tar.gz
-pocketsphinx-python.tar.gz
 .vscode/
+download/
