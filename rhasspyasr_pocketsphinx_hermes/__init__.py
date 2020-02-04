@@ -121,7 +121,7 @@ class AsrHermesMqtt:
             if session:
                 # Stop session
                 audio_data = session.recorder.stop()
-                if not session.transcription_sent and audio_data:
+                if not session.transcription_sent:
                     # Send transcription
                     session.transcription_sent = True
 
@@ -191,7 +191,9 @@ class AsrHermesMqtt:
                     wav_file.setnchannels(self.channels)
                     wav_file.writeframesraw(audio_data)
 
-                transcription = self.transcriber.transcribe_wav(wav_buffer.getvalue())
+                wav_bytes = wav_buffer.getvalue()
+                _LOGGER.debug("Transcribing %s byte(s) of audio data", len(wav_bytes))
+                transcription = self.transcriber.transcribe_wav(wav_bytes)
                 if transcription:
                     # Actual transcription
                     return AsrTextCaptured(
