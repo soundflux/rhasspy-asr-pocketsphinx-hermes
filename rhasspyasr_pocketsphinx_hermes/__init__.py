@@ -19,6 +19,7 @@ from rhasspyhermes.asr import (
     AsrToggleOn,
     AsrTrain,
     AsrTrainSuccess,
+    AsrAudioCaptured,
 )
 from rhasspyhermes.audioserver import AudioFrame
 from rhasspyhermes.base import Message
@@ -107,6 +108,7 @@ class AsrHermesMqtt:
             self.sessions[message.sessionId] = session
 
         # Start session
+        # TODO: Handle no stop on silence
         assert session
         session.recorder.start()
         _LOGGER.debug("Starting listening (sessionId=%s)", message.sessionId)
@@ -114,19 +116,34 @@ class AsrHermesMqtt:
 
     def stop_listening(
         self, message: AsrStopListening
-    ) -> typing.Iterable[typing.Union[AsrTextCaptured, AsrError]]:
+    ) -> typing.Iterable[
+        typing.Union[
+            AsrTextCaptured,
+            AsrError,
+            typing.Tuple[AsrAudioCaptured, typing.Dict[str, typing.Any]],
+        ]
+    ]:
         """Stop recording audio data for a session."""
         try:
             session = self.sessions.pop(message.sessionId, None)
             if session:
                 # Stop session
                 audio_data = session.recorder.stop()
+                wav_bytes = self.to_wav_bytes(audio_data)
+
+                if message.sendAudioCaptured:
+                    # Send audio data
+                    yield (
+                        AsrAudioCaptured(wav_bytes),
+                        {"siteId": message.siteId, "sessionId": message.sessionId},
+                    )
+
                 if not session.transcription_sent:
                     # Send transcription
                     session.transcription_sent = True
 
                     yield self.transcribe(
-                        audio_data, siteId=message.siteId, sessionId=message.sessionId
+                        wav_bytes, siteId=message.siteId, sessionId=message.sessionId
                     )
 
             _LOGGER.debug("Stopping listening (sessionId=%s)", message.sessionId)
@@ -158,10 +175,9 @@ class AsrHermesMqtt:
                     )
 
                     session.transcription_sent = True
+                    wav_bytes = self.to_wav_bytes(command.audio_data)
 
-                    yield self.transcribe(
-                        command.audio_data, siteId=siteId, sessionId=sessionId
-                    )
+                    yield self.transcribe(wav_bytes, siteId=siteId, sessionId=sessionId)
 
                     # Reset session (but keep open)
                     session.recorder.stop()
@@ -176,40 +192,31 @@ class AsrHermesMqtt:
                 )
 
     def transcribe(
-        self, audio_data: bytes, siteId: str = "default", sessionId: str = ""
+        self, wav_bytes: bytes, siteId: str = "default", sessionId: str = ""
     ) -> typing.Union[AsrTextCaptured, AsrError]:
         """Transcribe audio data and publish captured text."""
         try:
             if not self.transcriber:
                 self.transcriber = self.make_transcriber()
 
-            with io.BytesIO() as wav_buffer:
-                wav_file: wave.Wave_write = wave.open(wav_buffer, mode="wb")
-                with wav_file:
-                    wav_file.setframerate(self.sample_rate)
-                    wav_file.setsampwidth(self.sample_width)
-                    wav_file.setnchannels(self.channels)
-                    wav_file.writeframesraw(audio_data)
-
-                wav_bytes = wav_buffer.getvalue()
-                _LOGGER.debug("Transcribing %s byte(s) of audio data", len(wav_bytes))
-                transcription = self.transcriber.transcribe_wav(wav_bytes)
-                if transcription:
-                    # Actual transcription
-                    return AsrTextCaptured(
-                        text=transcription.text,
-                        likelihood=transcription.likelihood,
-                        seconds=transcription.transcribe_seconds,
-                        siteId=siteId,
-                        sessionId=sessionId,
-                    )
-
-                _LOGGER.warning("Received empty transcription")
-
-                # Empty transcription
+            _LOGGER.debug("Transcribing %s byte(s) of audio data", len(wav_bytes))
+            transcription = self.transcriber.transcribe_wav(wav_bytes)
+            if transcription:
+                # Actual transcription
                 return AsrTextCaptured(
-                    text="", likelihood=0, seconds=0, siteId=siteId, sessionId=sessionId
+                    text=transcription.text,
+                    likelihood=transcription.likelihood,
+                    seconds=transcription.transcribe_seconds,
+                    siteId=siteId,
+                    sessionId=sessionId,
                 )
+
+            _LOGGER.warning("Received empty transcription")
+
+            # Empty transcription
+            return AsrTextCaptured(
+                text="", likelihood=0, seconds=0, siteId=siteId, sessionId=sessionId
+            )
         except Exception as e:
             _LOGGER.exception("transcribe")
             return AsrError(
@@ -407,7 +414,11 @@ class AsrHermesMqtt:
                 json_payload = json.loads(msg.payload)
                 if self._check_siteId(json_payload):
                     for result in self.stop_listening(AsrStopListening(**json_payload)):
-                        self.publish(result)
+                        if isinstance(result, Message):
+                            self.publish(result)
+                        else:
+                            message, topic_args = result
+                            self.publish(message, **topic_args)
             elif AsrTrain.is_topic(msg.topic):
                 # rhasspy/asr/<siteId>/train
                 siteId = AsrTrain.get_siteId(msg.topic)
@@ -427,7 +438,15 @@ class AsrHermesMqtt:
     def publish(self, message: Message, **topic_args):
         """Publish a Hermes message to MQTT."""
         try:
-            _LOGGER.debug("-> %s", message)
+            if isinstance(message, AsrAudioCaptured):
+                _LOGGER.debug(
+                    "-> %s(%s byte(s))",
+                    message.__class__.__name__,
+                    len(message.wav_bytes),
+                )
+            else:
+                _LOGGER.debug("-> %s", message)
+
             topic = message.topic(**topic_args)
             payload = json.dumps(attr.asdict(message))
             _LOGGER.debug("Publishing %s char(s) to %s", len(payload), topic)
@@ -446,7 +465,7 @@ class AsrHermesMqtt:
 
     # -------------------------------------------------------------------------
 
-    def _convert_wav(self, wav_data: bytes) -> bytes:
+    def _convert_wav(self, wav_bytes: bytes) -> bytes:
         """Converts WAV data to required format with sox. Return raw audio."""
         return subprocess.run(
             [
@@ -468,7 +487,7 @@ class AsrHermesMqtt:
             ],
             check=True,
             stdout=subprocess.PIPE,
-            input=wav_data,
+            input=wav_bytes,
         ).stdout
 
     def maybe_convert_wav(self, wav_bytes: bytes) -> bytes:
@@ -485,3 +504,15 @@ class AsrHermesMqtt:
 
                 # Return original audio
                 return wav_file.readframes(wav_file.getnframes())
+
+    def to_wav_bytes(self, audio_data: bytes) -> bytes:
+        """Wrap raw audio data in WAV."""
+        with io.BytesIO() as wav_buffer:
+            wav_file: wave.Wave_write = wave.open(wav_buffer, mode="wb")
+            with wav_file:
+                wav_file.setframerate(self.sample_rate)
+                wav_file.setsampwidth(self.sample_width)
+                wav_file.setnchannels(self.channels)
+                wav_file.writeframesraw(audio_data)
+
+            return wav_buffer.getvalue()
