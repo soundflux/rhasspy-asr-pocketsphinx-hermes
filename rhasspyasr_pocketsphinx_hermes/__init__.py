@@ -11,6 +11,7 @@ import attr
 import rhasspyasr_pocketsphinx
 from rhasspyasr import Transcriber
 from rhasspyhermes.asr import (
+    AsrAudioCaptured,
     AsrError,
     AsrStartListening,
     AsrStopListening,
@@ -19,7 +20,6 @@ from rhasspyhermes.asr import (
     AsrToggleOn,
     AsrTrain,
     AsrTrainSuccess,
-    AsrAudioCaptured,
 )
 from rhasspyhermes.audioserver import AudioFrame
 from rhasspyhermes.base import Message
@@ -108,7 +108,6 @@ class AsrHermesMqtt:
             self.sessions[message.sessionId] = session
 
         # Start session
-        # TODO: Handle no stop on silence
         assert session
         session.recorder.start()
         _LOGGER.debug("Starting listening (sessionId=%s)", message.sessionId)
@@ -134,6 +133,7 @@ class AsrHermesMqtt:
                 if message.sendAudioCaptured:
                     # Send audio data
                     yield (
+                        # pylint: disable=E1121
                         AsrAudioCaptured(wav_bytes),
                         {"siteId": message.siteId, "sessionId": message.sessionId},
                     )
