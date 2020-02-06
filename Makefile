@@ -65,11 +65,19 @@ debian:
 downloads: rhasspy-libs $(DOWNLOAD_DIR)/pocketsphinx-python.tar.gz
 
 # Rhasspy development dependencies
-rhasspy-libs: $(DOWNLOAD_DIR)/rhasspy-asr-pocketsphinx-0.1.4.tar.gz
+rhasspy-libs: $(DOWNLOAD_DIR)/rhasspy-asr-pocketsphinx-0.1.4.tar.gz $(DOWNLOAD_DIR)/rhasspy-silence-0.1.2.tar.gz $(DOWNLOAD_DIR)/rhasspy-hermes-0.1.6.tar.gz
 
 $(DOWNLOAD_DIR)/rhasspy-asr-pocketsphinx-0.1.4.tar.gz:
 	mkdir -p "$(DOWNLOAD_DIR)"
 	curl -sSfL -o $@ "https://github.com/rhasspy/rhasspy-asr-pocketsphinx/archive/master.tar.gz"
+
+$(DOWNLOAD_DIR)/rhasspy-silence-0.1.2.tar.gz:
+	mkdir -p "$(DOWNLOAD_DIR)"
+	curl -sSfL -o $@ "https://github.com/rhasspy/rhasspy-silence/archive/master.tar.gz"
+
+$(DOWNLOAD_DIR)/rhasspy-hermes-0.1.6.tar.gz:
+	mkdir -p "$(DOWNLOAD_DIR)"
+	curl -sSfL -o $@ "https://github.com/rhasspy/rhasspy-hermes/archive/master.tar.gz"
 
 # Download Python Pocketsphinx library with no dependency on PulseAudio.
 $(DOWNLOAD_DIR)/pocketsphinx-python.tar.gz:
