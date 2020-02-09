@@ -161,7 +161,13 @@ class AsrHermesMqtt:
 
     def handle_audio_frame(
         self, wav_bytes: bytes, siteId: str = "default"
-    ) -> typing.Iterable[typing.Union[AsrTextCaptured, AsrError]]:
+    ) -> typing.Iterable[
+        typing.Union[
+            AsrTextCaptured,
+            AsrError,
+            typing.Tuple[AsrAudioCaptured, typing.Dict[str, typing.Any]],
+        ]
+    ]:
         """Process single frame of WAV audio"""
         audio_data = self.maybe_convert_wav(wav_bytes)
 
@@ -290,11 +296,12 @@ class AsrHermesMqtt:
             pronunciations: typing.Dict[str, typing.List[typing.List[str]]] = {}
 
             for base_dict_path in self.base_dictionaries:
-                _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
-                with open(base_dict_path, "r") as base_dict_file:
-                    rhasspyasr_pocketsphinx.read_dict(
-                        base_dict_file, word_dict=pronunciations
-                    )
+                if base_dict_path.is_file():
+                    _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
+                    with open(base_dict_path, "r") as base_dict_file:
+                        rhasspyasr_pocketsphinx.read_dict(
+                            base_dict_file, word_dict=pronunciations
+                        )
 
             # Try to look up in dictionary first
             missing_words: typing.Set[str] = set()
@@ -417,7 +424,11 @@ class AsrHermesMqtt:
 
                     siteId = AudioFrame.get_siteId(msg.topic)
                     for result in self.handle_audio_frame(msg.payload, siteId=siteId):
-                        self.publish(result)
+                        if isinstance(result, Message):
+                            self.publish(result)
+                        else:
+                            message, topic_args = result
+                            self.publish(message, **topic_args)
 
             elif msg.topic == AsrStartListening.topic():
                 # hermes/asr/startListening
