@@ -160,7 +160,7 @@ class AsrHermesMqtt:
             )
 
     def handle_audio_frame(
-        self, wav_bytes: bytes, siteId: str = "default"
+        self, frame_wav_bytes: bytes, siteId: str = "default"
     ) -> typing.Iterable[
         typing.Union[
             AsrTextCaptured,
@@ -169,7 +169,7 @@ class AsrHermesMqtt:
         ]
     ]:
         """Process single frame of WAV audio"""
-        audio_data = self.maybe_convert_wav(wav_bytes)
+        audio_data = self.maybe_convert_wav(frame_wav_bytes)
 
         # Add to every open session
         for sessionId, session in self.sessions.items():
@@ -377,9 +377,7 @@ class AsrHermesMqtt:
 
             if self.siteIds:
                 # Specific siteIds
-                topics.extend(
-                    [AsrTrain.topic(siteId=siteId) for siteId in self.siteIds]
-                )
+                topics.extend(AsrTrain.topic(siteId=siteId) for siteId in self.siteIds)
             else:
                 # All siteIds
                 topics.append(AsrTrain.topic(siteId="+"))
@@ -540,6 +538,6 @@ class AsrHermesMqtt:
                 wav_file.setframerate(self.sample_rate)
                 wav_file.setsampwidth(self.sample_width)
                 wav_file.setnchannels(self.channels)
-                wav_file.writeframesraw(audio_data)
+                wav_file.writeframes(audio_data)
 
             return wav_buffer.getvalue()

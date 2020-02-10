@@ -32,8 +32,7 @@ def main():
 
     _LOGGER.debug(args)
 
-    # Dispatch to appropriate sub-command
-    args.func(args)
+    run_mqtt(args)
 
 
 # -----------------------------------------------------------------------------
@@ -46,59 +45,50 @@ def get_args() -> argparse.Namespace:
         "--debug", action="store_true", help="Print DEBUG messages to the console"
     )
 
-    # Create subparsers for each sub-command
-    sub_parsers = parser.add_subparsers()
-    sub_parsers.required = True
-    sub_parsers.dest = "command"
-
-    # Run settings
-    run_parser = sub_parsers.add_parser("run", help="Run MQTT service")
-    run_parser.set_defaults(func=run_mqtt)
-
-    run_parser.add_argument(
+    parser.add_argument(
         "--acoustic-model",
         required=True,
         help="Path to Pocketsphinx acoustic model directory (hmm)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--dictionary",
         required=True,
         help="Path to read/write pronunciation dictionary file",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--dictionary-casing",
         choices=["upper", "lower", "ignore"],
         default="ignore",
         help="Case transformation for dictionary words (training, default: ignore)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--language-model",
         required=True,
         help="Path to read/write ARPA language model file",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--mllr-matrix", default=None, help="Path to read tuned MLLR matrix file"
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--watch-delay",
         type=float,
         default=1.0,
         help="Seconds between polling intent graph file for training",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--intent-graph", help="Path to write intent graph JSON file (training)"
     )
 
-    run_parser.add_argument(
+    parser.add_argument(
         "--base-dictionary",
         action="append",
         help="Path(s) to base pronunciation dictionary file(s) (training)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--g2p-model",
         help="Phonetisaurus FST model for guessing word pronunciations (training)",
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--g2p-casing",
         choices=["upper", "lower", "ignore"],
         default="ignore",
@@ -106,47 +96,16 @@ def get_args() -> argparse.Namespace:
     )
 
     # MQTT settings (run)
-    run_parser.add_argument(
+    parser.add_argument(
         "--host", default="localhost", help="MQTT host (default: localhost)"
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--port", type=int, default=1883, help="MQTT port (default: 1883)"
     )
-    run_parser.add_argument(
+    parser.add_argument(
         "--siteId",
         action="append",
         help="Hermes siteId(s) to listen for (default: all)",
-    )
-
-    # -------------------------------------------------------------------------
-
-    # Train settings
-    train_parser = sub_parsers.add_parser(
-        "train", help="Generate dictionary/language model from intent graph and exit"
-    )
-    train_parser.set_defaults(func=train)
-
-    train_parser.add_argument(
-        "--intent-graph", required=True, help="Path to read intent graph JSON file"
-    )
-
-    train_parser.add_argument(
-        "--dictionary",
-        required=True,
-        help="Path to write pronunciation dictionary file",
-    )
-    train_parser.add_argument(
-        "--language-model", required=True, help="Path to write ARPA language model file"
-    )
-
-    train_parser.add_argument(
-        "--base-dictionary",
-        action="append",
-        required=True,
-        help="Path(s) to base pronunciation dictionary file(s)",
-    )
-    train_parser.add_argument(
-        "--g2p-model", help="Phonetisaurus FST model for guessing word pronunciations"
     )
 
     return parser.parse_args()
@@ -277,6 +236,8 @@ def poll_files(
             _LOGGER.exception("poll_files")
 
 
+# -----------------------------------------------------------------------------
+
 def get_word_transform(name: str) -> typing.Callable[[str], str]:
     """Gets a word transformation function by name."""
     if name == "upper":
@@ -286,40 +247,6 @@ def get_word_transform(name: str) -> typing.Callable[[str], str]:
         return str.lower
 
     return lambda s: s
-
-
-# -----------------------------------------------------------------------------
-
-
-def train(args: argparse.Namespace):
-    """Generates ASR artifacts from intent JSON graph."""
-    # Convert to paths
-    args.dictionary = Path(args.dictionary)
-    args.language_model = Path(args.language_model)
-
-    if args.base_dictionary:
-        args.base_dictionary = [Path(p) for p in args.base_dictionary]
-
-    if args.g2p_model:
-        args.g2p_model = Path(args.g2p_model)
-
-    if args.intent_graph:
-        args.intent_graph = Path(args.intent_graph)
-
-    if not args.g2p_model:
-        _LOGGER.warning("You probably want to pass a g2p model when re-training.")
-
-    # Re-train ASR system
-    _LOGGER.debug("Re-training from %s", args.intent_graph)
-    with open(args.intent_graph, "r") as json_file:
-        graph_dict = json.load(json_file)
-        rhasspyasr_pocketsphinx.train(
-            graph_dict,
-            args.dictionary,
-            args.language_model,
-            args.base_dictionary,
-            args.g2p_model,
-        )
 
 
 # -----------------------------------------------------------------------------
