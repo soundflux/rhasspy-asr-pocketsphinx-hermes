@@ -41,7 +41,7 @@ sdist:
 # Docker
 # -----------------------------------------------------------------------------
 
-docker: pyinstaller
+docker: requirements_rhasspy.txt
 	docker build . -t "rhasspy/$(PACKAGE_NAME):$(version)" -t "rhasspy/$(PACKAGE_NAME):latest"
 
 deploy:
@@ -61,6 +61,9 @@ debian:
 # -----------------------------------------------------------------------------
 # Downloads
 # -----------------------------------------------------------------------------
+
+requirements_rhasspy.txt: requirements.txt
+	grep '^rhasspy-' $< | sed -e 's|=.\+|/archive/master.tar.gz|' | sed 's|^|https://github.com/rhasspy/|' > $@
 
 downloads: rhasspy-libs $(DOWNLOAD_DIR)/pocketsphinx-python.tar.gz
 

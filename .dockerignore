@@ -1,5 +1,4 @@
 *
-!pyinstaller/dist
-!debian/bin
-!mitlm-0.4.2-*.tar.gz
-!phonetisaurus-2019-*.tar.gz
+!requirements.txt
+!requirements_rhasspy.txt
+!rhasspyasr_pocketsphinx_hermes
