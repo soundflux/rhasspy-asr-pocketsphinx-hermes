@@ -400,17 +400,13 @@ class AsrHermesMqtt:
                 if self._check_siteId(json_payload):
                     self.enabled = True
                     _LOGGER.debug("Enabled")
-            elif msg.topic == AsrToggleOn.topic():
+            elif msg.topic == AsrToggleOff.topic():
                 json_payload = json.loads(msg.payload or "{}")
                 if self._check_siteId(json_payload):
                     self.enabled = False
                     _LOGGER.debug("Disabled")
 
-            if not self.enabled:
-                # Disabled
-                return
-
-            if AudioFrame.is_topic(msg.topic):
+            if self.enabled and AudioFrame.is_topic(msg.topic):
                 # Check siteId
                 if (not self.audioframe_topics) or (
                     msg.topic in self.audioframe_topics
