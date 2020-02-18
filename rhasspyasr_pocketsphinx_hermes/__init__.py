@@ -57,6 +57,7 @@ class AsrHermesMqtt:
         dictionary_word_transform: typing.Optional[typing.Callable[[str], str]] = None,
         g2p_model: typing.Optional[Path] = None,
         g2p_word_transform: typing.Optional[typing.Callable[[str], str]] = None,
+        unknown_words: typing.Optional[Path] = None,
         siteIds: typing.Optional[typing.List[str]] = None,
         enabled: bool = True,
         sample_rate: int = 16000,
@@ -73,6 +74,8 @@ class AsrHermesMqtt:
         self.dictionary_word_transform = dictionary_word_transform
         self.g2p_model = g2p_model
         self.g2p_word_transform = g2p_word_transform
+        self.unknown_words = unknown_words
+
         self.siteIds = siteIds or []
         self.enabled = enabled
 
@@ -268,6 +271,7 @@ class AsrHermesMqtt:
                 dictionary_word_transform=self.dictionary_word_transform,
                 g2p_model=self.g2p_model,
                 g2p_word_transform=self.g2p_word_transform,
+                missing_words_path=self.unknown_words,
             )
 
             _LOGGER.debug("Re-loading transcriber")
@@ -467,10 +471,10 @@ class AsrHermesMqtt:
                 payload = message.wav_bytes
             else:
                 _LOGGER.debug("-> %s", message)
-                payload = json.dumps(attr.asdict(message))
+                payload = json.dumps(attr.asdict(message)).encode()
 
             topic = message.topic(**topic_args)
-            _LOGGER.debug("Publishing %s char(s) to %s", len(payload), topic)
+            _LOGGER.debug("Publishing %s bytes(s) to %s", len(payload), topic)
             self.client.publish(topic, payload)
         except Exception:
             _LOGGER.exception("on_message")

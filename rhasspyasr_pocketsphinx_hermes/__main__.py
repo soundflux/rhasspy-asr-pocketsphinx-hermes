@@ -10,7 +10,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import paho.mqtt.client as mqtt
-import rhasspyasr_pocketsphinx
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
 from rhasspyhermes.asr import AsrTrain
 
@@ -94,6 +93,9 @@ def get_args() -> argparse.Namespace:
         default="ignore",
         help="Case transformation for g2p words (training, default: ignore)",
     )
+    parser.add_argument(
+        "--unknown-words", help="Path to write missing words from dictionary (training)"
+    )
 
     # MQTT settings (run)
     parser.add_argument(
@@ -164,6 +166,7 @@ def run_mqtt(args: argparse.Namespace):
             dictionary_word_transform=get_word_transform(args.dictionary_casing),
             g2p_model=args.g2p_model,
             g2p_word_transform=get_word_transform(args.g2p_casing),
+            unknown_words=args.unknown_words,
         )
 
         if args.intent_graph and (args.watch_delay > 0):
@@ -237,6 +240,7 @@ def poll_files(
 
 
 # -----------------------------------------------------------------------------
+
 
 def get_word_transform(name: str) -> typing.Callable[[str], str]:
     """Gets a word transformation function by name."""
