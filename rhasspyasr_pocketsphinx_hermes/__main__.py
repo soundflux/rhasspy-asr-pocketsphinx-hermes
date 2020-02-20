@@ -96,6 +96,11 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--unknown-words", help="Path to write missing words from dictionary (training)"
     )
+    parser.add_argument(
+        "--no-overwrite-train",
+        action="store_true",
+        help="Don't overwrite dictionary/language model during training",
+    )
 
     # MQTT settings (run)
     parser.add_argument(
@@ -145,6 +150,9 @@ def run_mqtt(args: argparse.Namespace):
         if args.intent_graph:
             args.intent_graph = Path(args.intent_graph)
 
+        if args.unknown_words:
+            args.unknown_words = Path(args.unknown_words)
+
         def make_transcriber():
             return PocketsphinxTranscriber(
                 args.acoustic_model,
@@ -167,6 +175,7 @@ def run_mqtt(args: argparse.Namespace):
             g2p_model=args.g2p_model,
             g2p_word_transform=get_word_transform(args.g2p_casing),
             unknown_words=args.unknown_words,
+            no_overwrite_train=args.no_overwrite_train,
         )
 
         if args.intent_graph and (args.watch_delay > 0):

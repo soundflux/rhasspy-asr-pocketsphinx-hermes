@@ -58,6 +58,7 @@ class AsrHermesMqtt:
         g2p_model: typing.Optional[Path] = None,
         g2p_word_transform: typing.Optional[typing.Callable[[str], str]] = None,
         unknown_words: typing.Optional[Path] = None,
+        no_overwrite_train: bool = False,
         siteIds: typing.Optional[typing.List[str]] = None,
         enabled: bool = True,
         sample_rate: int = 16000,
@@ -68,13 +69,25 @@ class AsrHermesMqtt:
         self.client = client
         self.make_transcriber = transcriber_factory
         self.transcriber: typing.Optional[Transcriber] = None
+
+        # Files to write during training
         self.dictionary = dictionary
         self.language_model = language_model
+
+        # Pronunciation dictionaries and word transform function
         self.base_dictionaries = base_dictionaries or []
         self.dictionary_word_transform = dictionary_word_transform
+
+        # Grapheme-to-phonme model (Phonetisaurus FST) and word transform
+        # function.
         self.g2p_model = g2p_model
         self.g2p_word_transform = g2p_word_transform
+
+        # Path to write missing words and guessed pronunciations
         self.unknown_words = unknown_words
+
+        # If True, dictionary and language model won't be overwritten during training
+        self.no_overwrite_train = no_overwrite_train
 
         self.siteIds = siteIds or []
         self.enabled = enabled
@@ -262,17 +275,20 @@ class AsrHermesMqtt:
                     "No base dictionaries provided. Training will likely fail."
                 )
 
-            # Generate dictionary/language model
-            rhasspyasr_pocketsphinx.train(
-                train.graph_dict,
-                self.dictionary,
-                self.language_model,
-                self.base_dictionaries,
-                dictionary_word_transform=self.dictionary_word_transform,
-                g2p_model=self.g2p_model,
-                g2p_word_transform=self.g2p_word_transform,
-                missing_words_path=self.unknown_words,
-            )
+            if not self.no_overwrite_train:
+                # Generate dictionary/language model
+                rhasspyasr_pocketsphinx.train(
+                    train.graph_dict,
+                    self.dictionary,
+                    self.language_model,
+                    self.base_dictionaries,
+                    dictionary_word_transform=self.dictionary_word_transform,
+                    g2p_model=self.g2p_model,
+                    g2p_word_transform=self.g2p_word_transform,
+                    missing_words_path=self.unknown_words,
+                )
+            else:
+                _LOGGER.warning("Not overwriting dictionary/language model")
 
             _LOGGER.debug("Re-loading transcriber")
             self.transcriber = self.make_transcriber()
