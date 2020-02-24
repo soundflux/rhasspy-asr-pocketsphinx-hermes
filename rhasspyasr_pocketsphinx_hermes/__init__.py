@@ -21,7 +21,7 @@ from rhasspyhermes.asr import (
     AsrTrain,
     AsrTrainSuccess,
 )
-from rhasspyhermes.audioserver import AudioFrame
+from rhasspyhermes.audioserver import AudioFrame, AudioSessionFrame
 from rhasspyhermes.base import Message
 from rhasspyhermes.g2p import G2pError, G2pPhonemes, G2pPronounce, G2pPronunciation
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
@@ -106,11 +106,6 @@ class AsrHermesMqtt:
         # WAV buffers for each session
         self.sessions: typing.Dict[str, SessionInfo] = {}
 
-        # Topic to listen for WAV chunks on
-        self.audioframe_topics: typing.List[str] = [
-            AudioFrame.topic(siteId=siteId) for siteId in self.siteIds
-        ]
-
         self.first_audio: bool = True
 
     # -------------------------------------------------------------------------
@@ -176,7 +171,10 @@ class AsrHermesMqtt:
             )
 
     def handle_audio_frame(
-        self, frame_wav_bytes: bytes, siteId: str = "default"
+        self,
+        frame_wav_bytes: bytes,
+        siteId: str = "default",
+        sessionId: typing.Optional[str] = None,
     ) -> typing.Iterable[
         typing.Union[
             AsrTextCaptured,
@@ -187,8 +185,15 @@ class AsrHermesMqtt:
         """Process single frame of WAV audio"""
         audio_data = self.maybe_convert_wav(frame_wav_bytes)
 
-        # Add to every open session
-        for sessionId, session in self.sessions.items():
+        if sessionId is None:
+            # Add to every open session
+            target_sessions = self.sessions.items()
+        else:
+            # Add to single session
+            target_sessions = [(sessionId, self.sessions[sessionId])]
+
+        # Add audio to session(s)
+        for sessionId, session in target_sessions:
             try:
                 command = session.recorder.process_chunk(audio_data)
                 if (
@@ -211,8 +216,7 @@ class AsrHermesMqtt:
                     if session.start_listening.sendAudioCaptured:
                         # Send audio data
                         yield (
-                            # pylint: disable=E1121
-                            AsrAudioCaptured(wav_bytes),
+                            AsrAudioCaptured(wav_bytes=wav_bytes),
                             {"siteId": siteId, "sessionId": sessionId},
                         )
 
@@ -388,19 +392,25 @@ class AsrHermesMqtt:
                 G2pPronounce.topic(),
             ]
 
-            if self.audioframe_topics:
-                # Specific siteIds
-                topics.extend(self.audioframe_topics)
-            else:
-                # All siteIds
-                topics.append(AudioFrame.topic(siteId="+"))
-
             if self.siteIds:
                 # Specific siteIds
-                topics.extend(AsrTrain.topic(siteId=siteId) for siteId in self.siteIds)
+                for siteId in self.siteIds:
+                    topics.extend(
+                        [
+                            AudioFrame.topic(siteId=siteId),
+                            AudioSessionFrame.topic(siteId=siteId, sessionId="+"),
+                            AsrTrain.topic(siteId=siteId),
+                        ]
+                    )
             else:
                 # All siteIds
-                topics.append(AsrTrain.topic(siteId="+"))
+                topics.extend(
+                    [
+                        AudioFrame.topic(siteId="+"),
+                        AudioSessionFrame.topic(siteId="+", sessionId="+"),
+                        AsrTrain.topic(siteId="+"),
+                    ]
+                )
 
             for topic in topics:
                 self.client.subscribe(topic)
@@ -428,16 +438,35 @@ class AsrHermesMqtt:
 
             if self.enabled and AudioFrame.is_topic(msg.topic):
                 # Check siteId
-                if (not self.audioframe_topics) or (
-                    msg.topic in self.audioframe_topics
-                ):
-                    # Add to all active sessions
+                siteId = AudioFrame.get_siteId(msg.topic)
+                if (not self.siteIds) or (siteId in self.siteIds):
                     if self.first_audio:
                         _LOGGER.debug("Receiving audio")
                         self.first_audio = False
 
-                    siteId = AudioFrame.get_siteId(msg.topic)
+                    # Add to all active sessions
                     for result in self.handle_audio_frame(msg.payload, siteId=siteId):
+                        if isinstance(result, Message):
+                            self.publish(result)
+                        else:
+                            message, topic_args = result
+                            self.publish(message, **topic_args)
+
+            elif self.enabled and AudioSessionFrame.is_topic(msg.topic):
+                # Check siteId
+                siteId = AudioSessionFrame.get_siteId(msg.topic)
+                sessionId = AudioSessionFrame.get_sessionId(msg.topic)
+                if ((not self.siteIds) or (siteId in self.siteIds)) and (
+                    sessionId in self.sessions
+                ):
+                    if self.first_audio:
+                        _LOGGER.debug("Receiving audio")
+                        self.first_audio = False
+
+                    # Add to specific session only
+                    for result in self.handle_audio_frame(
+                        msg.payload, siteId=siteId, sessionId=sessionId
+                    ):
                         if isinstance(result, Message):
                             self.publish(result)
                         else:
