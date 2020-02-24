@@ -2,3 +2,6 @@
 !requirements.txt
 !requirements_rhasspy.txt
 !rhasspyasr_pocketsphinx_hermes
+!etc
+!rhasspyasr_pocketsphinx_hermes/*.py
+!requirements.txt

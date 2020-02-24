@@ -1,48 +1,43 @@
-# ARG BUILD_ARCH=amd64
-# FROM ${BUILD_ARCH}/debian:buster-slim
-# ARG BUILD_ARCH=amd64
-
-# # Install system dependencies
-# RUN apt-get update && \
-#     apt-get install --no-install-recommends --yes \
-#     libgfortran3 sox
-
-# # Install pre-built mitlm
-# ADD mitlm-0.4.2-${BUILD_ARCH}.tar.gz /
-# RUN mv /mitlm/bin/* /usr/bin/
-# RUN mv /mitlm/lib/* /usr/lib/
-
-# # Install pre-built phonetisaurus
-# ADD phonetisaurus-2019-${BUILD_ARCH}.tar.gz /usr/
-
-# COPY pyinstaller/dist/* /usr/lib/rhasspyasr_pocketsphinx_hermes/
-# COPY debian/bin/* /usr/bin/
-
-# ENTRYPOINT ["/usr/bin/rhasspy-asr-pocketsphinx-hermes"]
-
-ARG BUILD_ARCH=amd64
+ARG BUILD_ARCH
 FROM ${BUILD_ARCH}/python:3.7-alpine as build
-RUN apk add --no-cache build-base swig
+ARG BUILD_ARCH
+ARG FRIENDLY_ARCH
 
-ENV VENV=/usr/.venv
+# Multi-arch
+COPY etc/qemu-arm-static /usr/bin/
+COPY etc/qemu-aarch64-static /usr/bin/
 
-RUN python3 -m venv $VENV
-RUN $VENV/bin/pip3 install --upgrade pip
-COPY requirements_rhasspy.txt requirements.txt /tmp/
-RUN $VENV/bin/pip3 install https://github.com/synesthesiam/pocketsphinx-python/releases/download/v1.0/pocketsphinx-python.tar.gz
-RUN $VENV/bin/pip3 install -r /tmp/requirements_rhasspy.txt
-RUN $VENV/bin/pip3 install -r /tmp/requirements.txt
+RUN apk update && apk add --no-cache build-base portaudio-dev swig
+RUN python3 -m venv /venv
+
+COPY requirements.txt /
+
+RUN grep '^rhasspy-' /requirements.txt | \
+    sed -e 's|=.\+|/archive/master.tar.gz|' | \
+    sed 's|^|https://github.com/rhasspy/|' \
+    > /requirements_rhasspy.txt
+
+RUN /venv/bin/pip install --upgrade pip
+RUN /venv/bin/pip install https://github.com/synesthesiam/pocketsphinx-python/releases/download/v1.0/pocketsphinx-python.tar.gz
+RUN /venv/bin/pip install -r /requirements_rhasspy.txt
+RUN /venv/bin/pip install -r /requirements.txt
 
 # -----------------------------------------------------------------------------
 
-ARG BUILD_ARCH=amd64
+ARG BUILD_ARCH
 FROM ${BUILD_ARCH}/python:3.7-alpine
+ARG BUILD_ARCH
+ARG FRIENDLY_ARCH
 
-RUN apk add --no-cache sox
+# Multi-arch
+COPY etc/qemu-arm-static /usr/bin/
+COPY etc/qemu-aarch64-static /usr/bin/
 
-WORKDIR /usr
-COPY --from=build /usr/.venv /usr/.venv/
+RUN apk update && apk add --no-cache portaudio sox
 
-COPY **/*.py rhasspyasr_pocketsphinx_hermes/
+COPY --from=build /venv/ /venv/
 
-ENTRYPOINT ["/usr/.venv/bin/python3", "-m", "rhasspyasr_pocketsphinx_hermes"]
+COPY rhasspyasr_pocketsphinx_hermes/ /rhasspyasr_pocketsphinx_hermes/
+WORKDIR /
+
+ENTRYPOINT ["/venv/bin/python3", "-m", "rhasspyasr_pocketsphinx_hermes"]
