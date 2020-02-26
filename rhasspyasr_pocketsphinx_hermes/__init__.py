@@ -187,13 +187,13 @@ class AsrHermesMqtt:
 
         if sessionId is None:
             # Add to every open session
-            target_sessions = self.sessions.items()
+            target_sessions = list(self.sessions.items())
         else:
             # Add to single session
             target_sessions = [(sessionId, self.sessions[sessionId])]
 
         # Add audio to session(s)
-        for sessionId, session in target_sessions:
+        for target_id, session in target_sessions:
             try:
                 command = session.recorder.process_chunk(audio_data)
                 if (
@@ -204,20 +204,20 @@ class AsrHermesMqtt:
                     assert command.audio_data is not None
                     _LOGGER.debug(
                         "Voice command recorded for session %s (%s byte(s))",
-                        sessionId,
+                        target_id,
                         len(command.audio_data),
                     )
 
                     session.transcription_sent = True
                     wav_bytes = self.to_wav_bytes(command.audio_data)
 
-                    yield self.transcribe(wav_bytes, siteId=siteId, sessionId=sessionId)
+                    yield self.transcribe(wav_bytes, siteId=siteId, sessionId=target_id)
 
                     if session.start_listening.sendAudioCaptured:
                         # Send audio data
                         yield (
                             AsrAudioCaptured(wav_bytes=wav_bytes),
-                            {"siteId": siteId, "sessionId": sessionId},
+                            {"siteId": siteId, "sessionId": target_id},
                         )
 
                     # Reset session (but keep open)
@@ -229,7 +229,7 @@ class AsrHermesMqtt:
                     error=str(e),
                     context=repr(self.transcriber),
                     siteId=siteId,
-                    sessionId=sessionId,
+                    sessionId=target_id,
                 )
 
     def transcribe(
