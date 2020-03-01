@@ -2,14 +2,17 @@
 import io
 import json
 import logging
+import os
 import subprocess
 import typing
 import wave
+from collections import defaultdict
 from pathlib import Path
 
 import attr
 import rhasspyasr_pocketsphinx
 from rhasspyasr import Transcriber
+from rhasspyasr_pocketsphinx import PronunciationsType
 from rhasspyhermes.asr import (
     AsrAudioCaptured,
     AsrError,
@@ -39,6 +42,15 @@ class SessionInfo:
     recorder: VoiceCommandRecorder
     start_listening: AsrStartListening
     transcription_sent: bool = False
+
+
+@attr.s(auto_attribs=True, slots=True)
+class PronunciationDictionary:
+    """Details of a phonetic dictionary."""
+
+    path: Path
+    pronunciations: PronunciationsType = {}
+    mtime_ns: typing.Optional[int] = None
 
 
 # -----------------------------------------------------------------------------
@@ -75,7 +87,9 @@ class AsrHermesMqtt:
         self.language_model = language_model
 
         # Pronunciation dictionaries and word transform function
-        self.base_dictionaries = base_dictionaries or []
+        self.base_dictionaries = [
+            PronunciationDictionary(path=path) for path in base_dictionaries
+        ]
         self.dictionary_word_transform = dictionary_word_transform
 
         # Grapheme-to-phonme model (Phonetisaurus FST) and word transform
@@ -279,13 +293,37 @@ class AsrHermesMqtt:
                     "No base dictionaries provided. Training will likely fail."
                 )
 
+            # Load base dictionaries
+            pronunciations: PronunciationsType = defaultdict(list)
+            for base_dict in self.base_dictionaries:
+                if not os.path.exists(base_dict.path):
+                    _LOGGER.warning(
+                        "Base dictionary does not exist: %s", base_dict.path
+                    )
+                    continue
+
+                # Re-load dictionary if modification time has changed
+                dict_mtime_ns = os.stat(base_dict.path).st_mtime_ns
+                if (base_dict.mtime_ns is None) or (
+                    base_dict.mtime_ns != dict_mtime_ns
+                ):
+                    base_dict.mtime_ns = dict_mtime_ns
+                    _LOGGER.debug("Loading base dictionary from %s", base_dict.path)
+                    with open(base_dict.path, "r") as base_dict_file:
+                        rhasspyasr_pocketsphinx.read_dict(
+                            base_dict_file, word_dict=base_dict.pronunciations
+                        )
+
+                for word in base_dict.pronunciations:
+                    pronunciations[word].extend(base_dict.pronunciations[word])
+
             if not self.no_overwrite_train:
                 # Generate dictionary/language model
                 rhasspyasr_pocketsphinx.train(
                     train.graph_dict,
                     self.dictionary,
                     self.language_model,
-                    self.base_dictionaries,
+                    pronunciations,
                     dictionary_word_transform=self.dictionary_word_transform,
                     g2p_model=self.g2p_model,
                     g2p_word_transform=self.g2p_word_transform,
