@@ -33,6 +33,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # -----------------------------------------------------------------------------
 
+TopicArgs = typing.Mapping[str, typing.Any]
+
 
 @attr.s(auto_attribs=True, slots=True)
 class SessionInfo:
@@ -283,7 +285,9 @@ class AsrHermesMqtt:
 
     def handle_train(
         self, train: AsrTrain, siteId: str = "default"
-    ) -> typing.Union[AsrTrainSuccess, AsrError]:
+    ) -> typing.Iterable[
+        typing.Union[typing.Tuple[AsrTrainSuccess, TopicArgs], AsrError]
+    ]:
         """Re-trains ASR system"""
         _LOGGER.debug("<- %s(%s)", train.__class__.__name__, train.id)
 
@@ -335,10 +339,10 @@ class AsrHermesMqtt:
             _LOGGER.debug("Re-loading transcriber")
             self.transcriber = self.make_transcriber()
 
-            return AsrTrainSuccess(id=train.id)
+            yield (AsrTrainSuccess(id=train.id), {"siteId": siteId})
         except Exception as e:
             _LOGGER.exception("handle_train")
-            return AsrError(
+            yield AsrError(
                 error=str(e),
                 context=repr(self.transcriber),
                 siteId=siteId,
@@ -480,13 +484,9 @@ class AsrHermesMqtt:
                         self.first_audio = False
 
                     # Add to all active sessions
-                    for result in self.handle_audio_frame(msg.payload, siteId=siteId):
-                        if isinstance(result, Message):
-                            self.publish(result)
-                        else:
-                            message, topic_args = result
-                            self.publish(message, **topic_args)
-
+                    self.publish_all(
+                        self.handle_audio_frame(msg.payload, siteId=siteId)
+                    )
             elif self.enabled and AudioSessionFrame.is_topic(msg.topic):
                 # Check siteId
                 siteId = AudioSessionFrame.get_siteId(msg.topic)
@@ -499,42 +499,38 @@ class AsrHermesMqtt:
                         self.first_audio = False
 
                     # Add to specific session only
-                    for result in self.handle_audio_frame(
-                        msg.payload, siteId=siteId, sessionId=sessionId
-                    ):
-                        if isinstance(result, Message):
-                            self.publish(result)
-                        else:
-                            message, topic_args = result
-                            self.publish(message, **topic_args)
-
+                    self.publish_all(
+                        self.handle_audio_frame(
+                            msg.payload, siteId=siteId, sessionId=sessionId
+                        )
+                    )
             elif msg.topic == AsrStartListening.topic():
                 # hermes/asr/startListening
                 json_payload = json.loads(msg.payload)
                 if self._check_siteId(json_payload):
-                    self.start_listening(AsrStartListening(**json_payload))
+                    self.start_listening(AsrStartListening.from_dict(json_payload))
             elif msg.topic == AsrStopListening.topic():
                 # hermes/asr/stopListening
                 json_payload = json.loads(msg.payload)
                 if self._check_siteId(json_payload):
-                    for result in self.stop_listening(AsrStopListening(**json_payload)):
-                        if isinstance(result, Message):
-                            self.publish(result)
-                        else:
-                            message, topic_args = result
-                            self.publish(message, **topic_args)
+                    self.publish_all(
+                        self.stop_listening(AsrStopListening.from_dict(json_payload))
+                    )
             elif AsrTrain.is_topic(msg.topic):
                 # rhasspy/asr/<siteId>/train
                 siteId = AsrTrain.get_siteId(msg.topic)
                 if (not self.siteIds) or (siteId in self.siteIds):
                     json_payload = json.loads(msg.payload)
-                    result = self.handle_train(AsrTrain(**json_payload), siteId=siteId)
-                    self.publish(result)
+                    self.publish_all(
+                        self.handle_train(
+                            AsrTrain.from_dict(json_payload), siteId=siteId
+                        )
+                    )
             elif msg.topic == G2pPronounce.topic():
                 # rhasspy/g2p/pronounce
                 json_payload = json.loads(msg.payload or "{}")
                 if self._check_siteId(json_payload):
-                    result = self.handle_pronounce(G2pPronounce(**json_payload))
+                    result = self.handle_pronounce(G2pPronounce.from_dict(json_payload))
                     self.publish(result)
         except Exception:
             _LOGGER.exception("on_message")
@@ -558,6 +554,20 @@ class AsrHermesMqtt:
             self.client.publish(topic, payload)
         except Exception:
             _LOGGER.exception("on_message")
+
+    def publish_all(
+        self,
+        messages: typing.Iterable[
+            typing.Union[Message, typing.Tuple[Message, TopicArgs]]
+        ],
+    ):
+        """Publish all messages."""
+        for maybe_message in messages:
+            if isinstance(maybe_message, Message):
+                self.publish(maybe_message)
+            else:
+                message, topic_args = maybe_message
+                self.publish(message, **topic_args)
 
     # -------------------------------------------------------------------------
 
