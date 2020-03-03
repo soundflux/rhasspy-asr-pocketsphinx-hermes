@@ -240,10 +240,11 @@ def poll_files(
 
                 with open(graph_path, "r") as graph_file:
                     graph_dict = json.load(graph_file)
-                    result = hermes.handle_train(
-                        AsrTrain(id=str(uuid4()), graph_dict=graph_dict)
+                    hermes.publish_all(
+                        hermes.handle_train(
+                            AsrTrain(id=str(uuid4()), graph_dict=graph_dict)
+                        )
                     )
-                    hermes.publish(result)
         except Exception:
             _LOGGER.exception("poll_files")
 

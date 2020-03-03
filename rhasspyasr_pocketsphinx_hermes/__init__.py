@@ -89,6 +89,7 @@ class AsrHermesMqtt:
         self.language_model = language_model
 
         # Pronunciation dictionaries and word transform function
+        base_dictionaries = base_dictionaries or []
         self.base_dictionaries = [
             PronunciationDictionary(path=path) for path in base_dictionaries
         ]
@@ -361,10 +362,10 @@ class AsrHermesMqtt:
             # Load base dictionaries
             pronunciations: typing.Dict[str, typing.List[typing.List[str]]] = {}
 
-            for base_dict_path in self.base_dictionaries:
-                if base_dict_path.is_file():
-                    _LOGGER.debug("Loading base dictionary from %s", base_dict_path)
-                    with open(base_dict_path, "r") as base_dict_file:
+            for base_dict in self.base_dictionaries:
+                if base_dict.path.is_file():
+                    _LOGGER.debug("Loading base dictionary from %s", base_dict.path)
+                    with open(base_dict.path, "r") as base_dict_file:
                         rhasspyasr_pocketsphinx.read_dict(
                             base_dict_file, word_dict=pronunciations
                         )
