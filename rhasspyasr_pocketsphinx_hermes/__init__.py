@@ -41,9 +41,11 @@ class SessionInfo:
     """Information about an open session."""
 
     sessionId: str
-    recorder: VoiceCommandRecorder
     start_listening: AsrStartListening
+    recorder: typing.Optional[VoiceCommandRecorder] = None
     transcription_sent: bool = False
+    num_wav_bytes: int = 0
+    audio_buffer: typing.Optional[bytes] = None
 
 
 @attr.s(auto_attribs=True, slots=True)
@@ -131,16 +133,23 @@ class AsrHermesMqtt:
         """Start recording audio data for a session."""
         session = self.sessions.get(message.sessionId)
         if not session:
-            session = SessionInfo(
-                sessionId=message.sessionId,
-                recorder=self.make_recorder(),
-                start_listening=message,
-            )
+            session = SessionInfo(sessionId=message.sessionId, start_listening=message)
+
+            if message.stopOnSilence:
+                # Use voice command recorder
+                session.recorder = self.make_recorder()
+            else:
+                # Use buffer
+                session.audio_buffer = bytes()
+
             self.sessions[message.sessionId] = session
 
         # Start session
         assert session
-        session.recorder.start()
+
+        if session.recorder:
+            session.recorder.start()
+
         _LOGGER.debug("Starting listening (sessionId=%s)", message.sessionId)
         self.first_audio = True
 
@@ -158,8 +167,19 @@ class AsrHermesMqtt:
             session = self.sessions.pop(message.sessionId, None)
             if session:
                 # Stop session
-                audio_data = session.recorder.stop()
+                if session.recorder:
+                    audio_data = session.recorder.stop()
+                else:
+                    assert session.audio_buffer is not None
+                    audio_data = session.audio_buffer
+
                 wav_bytes = self.to_wav_bytes(audio_data)
+
+                _LOGGER.debug(
+                    "Received a total of %s byte(s) for WAV data for session %s",
+                    session.num_wav_bytes,
+                    message.sessionId,
+                )
 
                 if not session.transcription_sent:
                     # Send transcription
@@ -212,34 +232,39 @@ class AsrHermesMqtt:
         # Add audio to session(s)
         for target_id, session in target_sessions:
             try:
-                command = session.recorder.process_chunk(audio_data)
-                if (
-                    session.start_listening.stopOnSilence
-                    and command
-                    and (command.result == VoiceCommandResult.SUCCESS)
-                ):
-                    assert command.audio_data is not None
-                    _LOGGER.debug(
-                        "Voice command recorded for session %s (%s byte(s))",
-                        target_id,
-                        len(command.audio_data),
-                    )
-
-                    session.transcription_sent = True
-                    wav_bytes = self.to_wav_bytes(command.audio_data)
-
-                    yield self.transcribe(wav_bytes, siteId=siteId, sessionId=target_id)
-
-                    if session.start_listening.sendAudioCaptured:
-                        # Send audio data
-                        yield (
-                            AsrAudioCaptured(wav_bytes=wav_bytes),
-                            {"siteId": siteId, "sessionId": target_id},
+                session.num_wav_bytes += len(frame_wav_bytes)
+                if session.recorder:
+                    # Check for end of voice command
+                    command = session.recorder.process_chunk(audio_data)
+                    if command and (command.result == VoiceCommandResult.SUCCESS):
+                        assert command.audio_data is not None
+                        _LOGGER.debug(
+                            "Voice command recorded for session %s (%s byte(s))",
+                            target_id,
+                            len(command.audio_data),
                         )
 
-                    # Reset session (but keep open)
-                    session.recorder.stop()
-                    session.recorder.start()
+                        session.transcription_sent = True
+                        wav_bytes = self.to_wav_bytes(command.audio_data)
+
+                        yield self.transcribe(
+                            wav_bytes, siteId=siteId, sessionId=target_id
+                        )
+
+                        if session.start_listening.sendAudioCaptured:
+                            # Send audio data
+                            yield (
+                                AsrAudioCaptured(wav_bytes=wav_bytes),
+                                {"siteId": siteId, "sessionId": target_id},
+                            )
+
+                        # Reset session (but keep open)
+                        session.recorder.stop()
+                        session.recorder.start()
+                else:
+                    # Add to buffer
+                    assert session.audio_buffer is not None
+                    session.audio_buffer += audio_data
             except Exception as e:
                 _LOGGER.exception("handle_audio_frame")
                 yield AsrError(
