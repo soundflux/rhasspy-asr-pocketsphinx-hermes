@@ -25,9 +25,9 @@ def main():
     args = get_args()
 
     if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format=args.log_format)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO, format=args.log_format)
 
     _LOGGER.debug(args)
 
@@ -113,6 +113,11 @@ def get_args() -> argparse.Namespace:
         "--siteId",
         action="append",
         help="Hermes siteId(s) to listen for (default: all)",
+    )
+    parser.add_argument(
+        "--log-format",
+        default="[%(levelname)s:%(asctime)s] %(name)s: %(message)s",
+        help="Python logger format",
     )
 
     return parser.parse_args()
