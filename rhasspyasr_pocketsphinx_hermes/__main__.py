@@ -15,7 +15,7 @@ from rhasspyhermes.asr import AsrTrain
 
 from . import AsrHermesMqtt
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("rhasspyasr_pocketsphinx_hermes")
 
 # -----------------------------------------------------------------------------
 
