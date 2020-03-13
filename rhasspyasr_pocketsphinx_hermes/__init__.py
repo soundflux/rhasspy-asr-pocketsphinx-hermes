@@ -232,6 +232,10 @@ class AsrHermesMqtt:
         # Add audio to session(s)
         for target_id, session in target_sessions:
             try:
+                # Skip if siteId doesn't match
+                if session.start_listening.siteId != siteId:
+                    continue
+
                 session.num_wav_bytes += len(frame_wav_bytes)
                 if session.recorder:
                     # Check for end of voice command
