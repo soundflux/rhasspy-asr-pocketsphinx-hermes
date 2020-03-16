@@ -1,4 +1,5 @@
 """Hermes MQTT server for Rhasspy ASR using Pocketsphinx"""
+import gzip
 import io
 import json
 import logging
@@ -10,6 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import attr
+import networkx as nx
 import rhasspyasr_pocketsphinx
 from rhasspyasr import Transcriber
 from rhasspyasr_pocketsphinx import PronunciationsType
@@ -319,7 +321,7 @@ class AsrHermesMqtt:
         typing.Union[typing.Tuple[AsrTrainSuccess, TopicArgs], AsrError]
     ]:
         """Re-trains ASR system"""
-        _LOGGER.debug("<- %s(%s)", train.__class__.__name__, train.id)
+        _LOGGER.debug("<- %s", train)
 
         try:
             if not self.base_dictionaries:
@@ -352,9 +354,14 @@ class AsrHermesMqtt:
                     pronunciations[word].extend(base_dict.pronunciations[word])
 
             if not self.no_overwrite_train:
+                _LOGGER.debug("Loading %s", train.graph_path)
+                with gzip.GzipFile(train.graph_path, mode="rb") as graph_gzip:
+                    graph = nx.readwrite.gpickle.read_gpickle(graph_gzip)
+
                 # Generate dictionary/language model
+                _LOGGER.debug("Starting training")
                 rhasspyasr_pocketsphinx.train(
-                    train.graph_dict,
+                    graph,
                     self.dictionary,
                     self.language_model,
                     pronunciations,

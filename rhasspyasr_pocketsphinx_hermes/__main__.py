@@ -1,17 +1,11 @@
 """Command-line interface to rhasspyasr-asr-pocketsphinx-hermes"""
 import argparse
-import json
 import logging
-import os
-import threading
-import time
 import typing
 from pathlib import Path
-from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 from rhasspyasr_pocketsphinx import PocketsphinxTranscriber
-from rhasspyhermes.asr import AsrTrain
 
 from . import AsrHermesMqtt
 
@@ -67,12 +61,6 @@ def get_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--mllr-matrix", default=None, help="Path to read tuned MLLR matrix file"
-    )
-    parser.add_argument(
-        "--watch-delay",
-        type=float,
-        default=1.0,
-        help="Seconds between polling intent graph file for training",
     )
     parser.add_argument(
         "--intent-graph", help="Path to write intent graph JSON file (training)"
@@ -190,13 +178,6 @@ def run_mqtt(args: argparse.Namespace):
                 args.watch_delay,
             )
 
-            # Start polling thread
-            threading.Thread(
-                target=poll_files,
-                args=(args.intent_graph, args.watch_delay, hermes, args.debug),
-                daemon=True,
-            ).start()
-
         def on_disconnect(client, userdata, flags, rc):
             try:
                 # Automatically reconnect
@@ -218,40 +199,6 @@ def run_mqtt(args: argparse.Namespace):
         pass
     finally:
         _LOGGER.debug("Shutting down")
-
-
-def poll_files(
-    graph_path: Path, delay_seconds: float, hermes: AsrHermesMqtt, debug: bool = False
-):
-    """Poll intent graph and re-trains when changed."""
-    last_timestamps: typing.Dict[Path, int] = {}
-
-    while True:
-        time.sleep(delay_seconds)
-        try:
-            retrain = False
-            for path in [graph_path]:
-                timestamp = os.stat(path).st_mtime_ns
-                last_timestamp = last_timestamps.get(path)
-
-                if (last_timestamp is not None) and (timestamp != last_timestamp):
-                    retrain = True
-
-                # Update timestamp
-                last_timestamps[path] = timestamp
-
-            if retrain:
-                _LOGGER.debug("%s changed. Re-training...", str(graph_path))
-
-                with open(graph_path, "r") as graph_file:
-                    graph_dict = json.load(graph_file)
-                    hermes.publish_all(
-                        hermes.handle_train(
-                            AsrTrain(id=str(uuid4()), graph_dict=graph_dict)
-                        )
-                    )
-        except Exception:
-            _LOGGER.exception("poll_files")
 
 
 # -----------------------------------------------------------------------------
