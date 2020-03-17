@@ -1,5 +1,6 @@
 """Command-line interface to rhasspyasr-asr-pocketsphinx-hermes"""
 import argparse
+import asyncio
 import logging
 import typing
 from pathlib import Path
@@ -117,6 +118,8 @@ def get_args() -> argparse.Namespace:
 def run_mqtt(args: argparse.Namespace):
     """Runs Hermes ASR MQTT service."""
     try:
+        loop = asyncio.get_event_loop()
+
         # Load transciber
         _LOGGER.debug(
             "Loading Pocketsphinx decoder with (hmm=%s, dict=%s, lm=%s, mllr=%s)",
@@ -169,6 +172,7 @@ def run_mqtt(args: argparse.Namespace):
             g2p_word_transform=get_word_transform(args.g2p_casing),
             unknown_words=args.unknown_words,
             no_overwrite_train=args.no_overwrite_train,
+            loop=loop,
         )
 
         if args.intent_graph and (args.watch_delay > 0):
@@ -193,8 +197,10 @@ def run_mqtt(args: argparse.Namespace):
 
         _LOGGER.debug("Connecting to %s:%s", args.host, args.port)
         client.connect(args.host, args.port)
+        client.loop_start()
 
-        client.loop_forever()
+        # Run event loop
+        loop.run_forever()
     except KeyboardInterrupt:
         pass
     finally:
