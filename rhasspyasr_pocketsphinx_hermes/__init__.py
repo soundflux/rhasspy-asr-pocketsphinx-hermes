@@ -29,6 +29,7 @@ from rhasspyhermes.asr import (
 )
 from rhasspyhermes.audioserver import AudioFrame, AudioSessionFrame
 from rhasspyhermes.base import Message
+from rhasspyhermes.client import HermesClient
 from rhasspyhermes.g2p import G2pError, G2pPhonemes, G2pPronounce, G2pPronunciation
 from rhasspynlu.g2p import PronunciationsType
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
@@ -67,7 +68,7 @@ class PronunciationDictionary:
 # -----------------------------------------------------------------------------
 
 
-class AsrHermesMqtt:
+class AsrHermesMqtt(HermesClient):
     """Hermes MQTT server for Rhasspy ASR using Pocketsphinx."""
 
     def __init__(
@@ -90,7 +91,27 @@ class AsrHermesMqtt:
         make_recorder: typing.Callable[[], VoiceCommandRecorder] = None,
         loop=None,
     ):
-        self.client = client
+        super().__init__(
+            "rhasspyasr_pocketsphinx_hermes",
+            client,
+            siteIds=siteIds,
+            loop=loop,
+            sample_rate=sample_rate,
+            sample_width=sample_width,
+            channels=channels,
+        )
+
+        self.subscribe(
+            AsrToggleOn,
+            AsrToggleOff,
+            AsrStartListening,
+            AsrStopListening,
+            G2pPronounce,
+            AudioFrame,
+            AudioSessionFrame,
+            AsrTrain,
+        )
+
         self.make_transcriber = transcriber_factory
         self.transcriber: typing.Optional[Transcriber] = None
 
@@ -116,13 +137,8 @@ class AsrHermesMqtt:
         # If True, dictionary and language model won't be overwritten during training
         self.no_overwrite_train = no_overwrite_train
 
-        self.siteIds = siteIds or []
+        # True if ASR system is enabled
         self.enabled = enabled
-
-        # Required audio format
-        self.sample_rate = sample_rate
-        self.sample_width = sample_width
-        self.channels = channels
 
         # No timeout
         def default_recorder():
@@ -135,11 +151,12 @@ class AsrHermesMqtt:
 
         self.first_audio: bool = True
 
+        # Event loop
         self.loop = loop or asyncio.get_event_loop()
 
     # -------------------------------------------------------------------------
 
-    async def start_listening(self, message: AsrStartListening):
+    async def start_listening(self, message: AsrStartListening) -> None:
         """Start recording audio data for a session."""
         session = self.sessions.get(message.sessionId)
         if not session:
@@ -335,8 +352,6 @@ class AsrHermesMqtt:
         typing.Union[typing.Tuple[AsrTrainSuccess, TopicArgs], AsrError]
     ]:
         """Re-trains ASR system"""
-        _LOGGER.debug("<- %s", train)
-
         try:
             if not self.base_dictionaries:
                 _LOGGER.warning(
@@ -474,216 +489,49 @@ class AsrHermesMqtt:
 
     # -------------------------------------------------------------------------
 
-    def on_connect(self, client, userdata, flags, rc):
-        """Connected to MQTT broker."""
-        try:
-            topics = [
-                AsrToggleOn.topic(),
-                AsrToggleOff.topic(),
-                AsrStartListening.topic(),
-                AsrStopListening.topic(),
-                G2pPronounce.topic(),
-            ]
-
-            if self.siteIds:
-                # Specific siteIds
-                for siteId in self.siteIds:
-                    topics.extend(
-                        [
-                            AudioFrame.topic(siteId=siteId),
-                            AudioSessionFrame.topic(siteId=siteId, sessionId="+"),
-                            AsrTrain.topic(siteId=siteId),
-                        ]
-                    )
-            else:
-                # All siteIds
-                topics.extend(
-                    [
-                        AudioFrame.topic(siteId="+"),
-                        AudioSessionFrame.topic(siteId="+", sessionId="+"),
-                        AsrTrain.topic(siteId="+"),
-                    ]
-                )
-
-            for topic in topics:
-                self.client.subscribe(topic)
-                _LOGGER.debug("Subscribed to %s", topic)
-        except Exception:
-            _LOGGER.exception("on_connect")
-
-    def on_message(self, client, userdata, msg):
+    async def on_message(
+        self, message: Message, siteId=None, sessionId=None, topic=None
+    ):
         """Received message from MQTT broker."""
-        try:
-            # Check enable/disable messages
-            if msg.topic == AsrToggleOn.topic():
-                json_payload = json.loads(msg.payload or "{}")
-                if self._check_siteId(json_payload):
-                    self.enabled = True
-                    _LOGGER.debug("Enabled")
-            elif msg.topic == AsrToggleOff.topic():
-                json_payload = json.loads(msg.payload or "{}")
-                if self._check_siteId(json_payload):
-                    self.enabled = False
-                    _LOGGER.debug("Disabled")
+        # Check enable/disable messages
+        if isinstance(message, AsrToggleOn):
+            self.enabled = True
+            _LOGGER.debug("Enabled")
+        elif isinstance(message, AsrToggleOff):
+            self.enabled = False
+            _LOGGER.debug("Disabled")
+        elif self.enabled and isinstance(message, AudioFrame):
+            if self.first_audio:
+                _LOGGER.debug("Receiving audio")
+                self.first_audio = False
 
-            if self.enabled and AudioFrame.is_topic(msg.topic):
-                # Check siteId
-                siteId = AudioFrame.get_siteId(msg.topic)
-                if (not self.siteIds) or (siteId in self.siteIds):
-                    if self.first_audio:
-                        _LOGGER.debug("Receiving audio")
-                        self.first_audio = False
+            # Add to all active sessions
+            await self.publish_all(
+                self.handle_audio_frame(message.wav_bytes, siteId=siteId)
+            )
+        elif self.enabled and isinstance(message, AudioSessionFrame):
+            if sessionId in self.sessions:
+                if self.first_audio:
+                    _LOGGER.debug("Receiving audio")
+                    self.first_audio = False
 
-                    # Add to all active sessions
-                    self.publish_all(
-                        self.handle_audio_frame(msg.payload, siteId=siteId)
+                # Add to specific session only
+                await self.publish_all(
+                    self.handle_audio_frame(
+                        message.wav_bytes, siteId=siteId, sessionId=sessionId
                     )
-            elif self.enabled and AudioSessionFrame.is_topic(msg.topic):
-                # Check siteId
-                siteId = AudioSessionFrame.get_siteId(msg.topic)
-                sessionId = AudioSessionFrame.get_sessionId(msg.topic)
-                if ((not self.siteIds) or (siteId in self.siteIds)) and (
-                    sessionId in self.sessions
-                ):
-                    if self.first_audio:
-                        _LOGGER.debug("Receiving audio")
-                        self.first_audio = False
-
-                    # Add to specific session only
-                    self.publish_all(
-                        self.handle_audio_frame(
-                            msg.payload, siteId=siteId, sessionId=sessionId
-                        )
-                    )
-            elif msg.topic == AsrStartListening.topic():
-                # hermes/asr/startListening
-                json_payload = json.loads(msg.payload)
-                if self._check_siteId(json_payload):
-                    asyncio.run_coroutine_threadsafe(
-                        self.start_listening(AsrStartListening.from_dict(json_payload)),
-                        loop=self.loop,
-                    )
-            elif msg.topic == AsrStopListening.topic():
-                # hermes/asr/stopListening
-                json_payload = json.loads(msg.payload)
-                if self._check_siteId(json_payload):
-                    self.publish_all(
-                        self.stop_listening(AsrStopListening.from_dict(json_payload))
-                    )
-            elif AsrTrain.is_topic(msg.topic):
-                # rhasspy/asr/<siteId>/train
-                siteId = AsrTrain.get_siteId(msg.topic)
-                if (not self.siteIds) or (siteId in self.siteIds):
-                    json_payload = json.loads(msg.payload)
-                    self.publish_all(
-                        self.handle_train(
-                            AsrTrain.from_dict(json_payload), siteId=siteId
-                        )
-                    )
-            elif msg.topic == G2pPronounce.topic():
-                # rhasspy/g2p/pronounce
-                json_payload = json.loads(msg.payload or "{}")
-                if self._check_siteId(json_payload):
-                    self.publish_all(
-                        self.handle_pronounce(G2pPronounce.from_dict(json_payload))
-                    )
-        except Exception:
-            _LOGGER.exception("on_message")
-
-    def publish(self, message: Message, **topic_args):
-        """Publish a Hermes message to MQTT."""
-        try:
-            if isinstance(message, AsrAudioCaptured):
-                _LOGGER.debug(
-                    "-> %s(%s byte(s))",
-                    message.__class__.__name__,
-                    len(message.wav_bytes),
                 )
-                payload = message.wav_bytes
-            else:
-                _LOGGER.debug("-> %s", message)
-                payload = json.dumps(attr.asdict(message)).encode()
-
-            topic = message.topic(**topic_args)
-            _LOGGER.debug("Publishing %s bytes(s) to %s", len(payload), topic)
-            self.client.publish(topic, payload)
-        except Exception:
-            _LOGGER.exception("publish")
-
-    def publish_all(self, async_generator: GeneratorType):
-        """Publish all messages from an async generator"""
-        asyncio.run_coroutine_threadsafe(
-            self.async_publish_all(async_generator), self.loop
-        )
-
-    async def async_publish_all(self, async_generator: GeneratorType):
-        """Enumerate all messages in an async generator publish them"""
-        async for maybe_message in async_generator:
-            if isinstance(maybe_message, Message):
-                self.publish(maybe_message)
-            else:
-                message, kwargs = maybe_message
-                self.publish(message, **kwargs)
-
-    # -------------------------------------------------------------------------
-
-    def _check_siteId(self, json_payload: typing.Dict[str, typing.Any]) -> bool:
-        if self.siteIds:
-            return json_payload.get("siteId", "default") in self.siteIds
-
-        # All sites
-        return True
-
-    # -------------------------------------------------------------------------
-
-    def _convert_wav(self, wav_bytes: bytes) -> bytes:
-        """Converts WAV data to required format with sox. Return raw audio."""
-        return subprocess.run(
-            [
-                "sox",
-                "-t",
-                "wav",
-                "-",
-                "-r",
-                str(self.sample_rate),
-                "-e",
-                "signed-integer",
-                "-b",
-                str(self.sample_width * 8),
-                "-c",
-                str(self.channels),
-                "-t",
-                "raw",
-                "-",
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            input=wav_bytes,
-        ).stdout
-
-    def maybe_convert_wav(self, wav_bytes: bytes) -> bytes:
-        """Converts WAV data to required format if necessary. Returns raw audio."""
-        with io.BytesIO(wav_bytes) as wav_io:
-            with wave.open(wav_io, "rb") as wav_file:
-                if (
-                    (wav_file.getframerate() != self.sample_rate)
-                    or (wav_file.getsampwidth() != self.sample_width)
-                    or (wav_file.getnchannels() != self.channels)
-                ):
-                    # Return converted wav
-                    return self._convert_wav(wav_bytes)
-
-                # Return original audio
-                return wav_file.readframes(wav_file.getnframes())
-
-    def to_wav_bytes(self, audio_data: bytes) -> bytes:
-        """Wrap raw audio data in WAV."""
-        with io.BytesIO() as wav_buffer:
-            wav_file: wave.Wave_write = wave.open(wav_buffer, mode="wb")
-            with wav_file:
-                wav_file.setframerate(self.sample_rate)
-                wav_file.setsampwidth(self.sample_width)
-                wav_file.setnchannels(self.channels)
-                wav_file.writeframes(audio_data)
-
-            return wav_buffer.getvalue()
+        elif isinstance(message, AsrStartListening):
+            # hermes/asr/startListening
+            await self.start_listening(message)
+        elif isinstance(message, AsrStopListening):
+            # hermes/asr/stopListening
+            await self.publish_all(self.stop_listening(message))
+        elif isinstance(message, AsrTrain):
+            # rhasspy/asr/<siteId>/train
+            await self.publish_all(self.handle_train(message, siteId=siteId))
+        elif isinstance(message, G2pPronounce):
+            # rhasspy/g2p/pronounce
+            await self.publish_all(self.handle_pronounce(message))
+        else:
+            _LOGGER.warning("Unexpected message: %s", message)
