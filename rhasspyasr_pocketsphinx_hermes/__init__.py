@@ -500,27 +500,29 @@ class AsrHermesMqtt(HermesClient):
         elif isinstance(message, AsrToggleOff):
             self.enabled = False
             _LOGGER.debug("Disabled")
-        elif self.enabled and isinstance(message, AudioFrame):
-            if self.first_audio:
-                _LOGGER.debug("Receiving audio")
-                self.first_audio = False
-
-            # Add to all active sessions
-            await self.publish_all(
-                self.handle_audio_frame(message.wav_bytes, siteId=siteId)
-            )
-        elif self.enabled and isinstance(message, AudioSessionFrame):
-            if sessionId in self.sessions:
+        elif isinstance(message, AudioFrame):
+            if self.enabled:
                 if self.first_audio:
                     _LOGGER.debug("Receiving audio")
                     self.first_audio = False
 
-                # Add to specific session only
+                # Add to all active sessions
                 await self.publish_all(
-                    self.handle_audio_frame(
-                        message.wav_bytes, siteId=siteId, sessionId=sessionId
-                    )
+                    self.handle_audio_frame(message.wav_bytes, siteId=siteId)
                 )
+        elif isinstance(message, AudioSessionFrame):
+            if self.enabled:
+                if sessionId in self.sessions:
+                    if self.first_audio:
+                        _LOGGER.debug("Receiving audio")
+                        self.first_audio = False
+
+                    # Add to specific session only
+                    await self.publish_all(
+                        self.handle_audio_frame(
+                            message.wav_bytes, siteId=siteId, sessionId=sessionId
+                        )
+                    )
         elif isinstance(message, AsrStartListening):
             # hermes/asr/startListening
             await self.start_listening(message)
