@@ -2,7 +2,7 @@ Package: rhasspy-asr-pocketsphinx-hermes
 Version: ${version}
 Section: utils
 Priority: optional
-Depends: sox,libgfortran3
+Depends: sox,libngram-tools
 Architecture: ${architecture}
 Maintainer: Michael Hansen
 Description: Hermes MQTT service for Rhasspy Pocketsphinx ASR
