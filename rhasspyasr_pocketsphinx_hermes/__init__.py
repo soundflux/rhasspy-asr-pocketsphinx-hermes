@@ -608,7 +608,7 @@ class AsrHermesMqtt:
             _LOGGER.debug("Publishing %s bytes(s) to %s", len(payload), topic)
             self.client.publish(topic, payload)
         except Exception:
-            _LOGGER.exception("on_message")
+            _LOGGER.exception("publish")
 
     def publish_all(self, async_generator: GeneratorType):
         """Publish all messages from an async generator"""
