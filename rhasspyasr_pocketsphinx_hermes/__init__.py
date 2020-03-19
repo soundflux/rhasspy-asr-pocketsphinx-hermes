@@ -490,7 +490,11 @@ class AsrHermesMqtt(HermesClient):
     # -------------------------------------------------------------------------
 
     async def on_message(
-        self, message: Message, siteId=None, sessionId=None, topic=None
+        self,
+        message: Message,
+        siteId: typing.Optional[str] = None,
+        sessionId: typing.Optional[str] = None,
+        topic: typing.Optional[str] = None,
     ):
         """Received message from MQTT broker."""
         # Check enable/disable messages
