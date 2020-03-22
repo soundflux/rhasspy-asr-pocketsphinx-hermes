@@ -1,13 +1,9 @@
 """Hermes MQTT server for Rhasspy ASR using Pocketsphinx"""
 import asyncio
 import gzip
-import io
-import json
 import logging
 import os
-import subprocess
 import typing
-import wave
 from collections import defaultdict
 from pathlib import Path
 
@@ -506,6 +502,7 @@ class AsrHermesMqtt(HermesClient):
             _LOGGER.debug("Disabled")
         elif isinstance(message, AudioFrame):
             if self.enabled:
+                assert siteId, "Missing siteId"
                 if self.first_audio:
                     _LOGGER.debug("Receiving audio")
                     self.first_audio = False
@@ -516,6 +513,7 @@ class AsrHermesMqtt(HermesClient):
                 )
         elif isinstance(message, AudioSessionFrame):
             if self.enabled:
+                assert siteId and sessionId, "Missing siteId or sessionId"
                 if sessionId in self.sessions:
                     if self.first_audio:
                         _LOGGER.debug("Receiving audio")
@@ -535,6 +533,7 @@ class AsrHermesMqtt(HermesClient):
             await self.publish_all(self.stop_listening(message))
         elif isinstance(message, AsrTrain):
             # rhasspy/asr/<siteId>/train
+            assert siteId, "Missing siteId"
             await self.publish_all(self.handle_train(message, siteId=siteId))
         elif isinstance(message, G2pPronounce):
             # rhasspy/g2p/pronounce
