@@ -33,10 +33,6 @@ def get_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(prog="rhasspy-asr-pocketsphinx-hermes")
     parser.add_argument(
-        "--debug", action="store_true", help="Print DEBUG messages to the console"
-    )
-
-    parser.add_argument(
         "--acoustic-model",
         required=True,
         help="Path to Pocketsphinx acoustic model directory (hmm)",
