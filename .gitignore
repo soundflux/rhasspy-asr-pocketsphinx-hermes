@@ -9,3 +9,5 @@ etc/test/cmusphinx-en-us-ptm-5.2/
 .vscode/
 download/
 etc/qemu-*
+.coverage
+coverage.xml
