@@ -214,8 +214,7 @@ class AsrHermesMqtt(HermesClient):
                     if session.start_listening.sendAudioCaptured:
                         # Send audio data
                         yield (
-                            # pylint: disable=E1121
-                            AsrAudioCaptured(wav_bytes),
+                            AsrAudioCaptured(wav_bytes=wav_bytes),
                             {"siteId": message.siteId, "sessionId": message.sessionId},
                         )
 
