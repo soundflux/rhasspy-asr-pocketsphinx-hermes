@@ -5,9 +5,9 @@ import logging
 import os
 import typing
 from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 
-import attr
 import networkx as nx
 import rhasspyasr_pocketsphinx
 import rhasspynlu
@@ -35,7 +35,7 @@ _LOGGER = logging.getLogger("rhasspyasr_pocketsphinx_hermes")
 # -----------------------------------------------------------------------------
 
 
-@attr.s(auto_attribs=True, slots=True)
+@dataclass
 class SessionInfo:
     """Information about an open session."""
 
@@ -47,12 +47,12 @@ class SessionInfo:
     audio_buffer: typing.Optional[bytes] = None
 
 
-@attr.s(auto_attribs=True, slots=True)
+@dataclass
 class PronunciationDictionary:
     """Details of a phonetic dictionary."""
 
     path: Path
-    pronunciations: PronunciationsType = {}
+    pronunciations: PronunciationsType = field(default_factory=dict)
     mtime_ns: typing.Optional[int] = None
 
 
@@ -486,6 +486,7 @@ class AsrHermesMqtt(HermesClient):
         # Check enable/disable messages
         if isinstance(message, AsrToggleOn):
             self.enabled = True
+            self.first_audio = True
             _LOGGER.debug("Enabled")
         elif isinstance(message, AsrToggleOff):
             self.enabled = False
