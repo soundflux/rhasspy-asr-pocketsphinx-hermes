@@ -94,64 +94,61 @@ def get_args() -> argparse.Namespace:
 
 def run_mqtt(args: argparse.Namespace):
     """Runs Hermes ASR MQTT service."""
-    try:
-        loop = asyncio.get_event_loop()
+    # Load transciber
+    _LOGGER.debug(
+        "Loading Pocketsphinx decoder with (hmm=%s, dict=%s, lm=%s, mllr=%s)",
+        args.acoustic_model,
+        args.dictionary,
+        args.language_model,
+        args.mllr_matrix,
+    )
 
-        # Load transciber
-        _LOGGER.debug(
-            "Loading Pocketsphinx decoder with (hmm=%s, dict=%s, lm=%s, mllr=%s)",
+    # Convert to paths
+    args.acoustic_model = Path(args.acoustic_model)
+    args.dictionary = Path(args.dictionary)
+    args.language_model = Path(args.language_model)
+
+    if args.mllr_matrix:
+        args.mllr_matrix = Path(args.mllr_matrix)
+
+    if args.base_dictionary:
+        args.base_dictionary = [Path(p) for p in args.base_dictionary]
+
+    if args.g2p_model:
+        args.g2p_model = Path(args.g2p_model)
+
+    if args.intent_graph:
+        args.intent_graph = Path(args.intent_graph)
+
+    if args.unknown_words:
+        args.unknown_words = Path(args.unknown_words)
+
+    def make_transcriber():
+        return PocketsphinxTranscriber(
             args.acoustic_model,
             args.dictionary,
             args.language_model,
-            args.mllr_matrix,
+            mllr_matrix=args.mllr_matrix,
+            debug=args.debug,
         )
 
-        # Convert to paths
-        args.acoustic_model = Path(args.acoustic_model)
-        args.dictionary = Path(args.dictionary)
-        args.language_model = Path(args.language_model)
+    # Listen for messages
+    client = mqtt.Client()
+    hermes = AsrHermesMqtt(
+        client,
+        make_transcriber,
+        dictionary=args.dictionary,
+        language_model=args.language_model,
+        base_dictionaries=args.base_dictionary,
+        siteIds=args.siteId,
+        dictionary_word_transform=get_word_transform(args.dictionary_casing),
+        g2p_model=args.g2p_model,
+        g2p_word_transform=get_word_transform(args.g2p_casing),
+        unknown_words=args.unknown_words,
+        no_overwrite_train=args.no_overwrite_train,
+    )
 
-        if args.mllr_matrix:
-            args.mllr_matrix = Path(args.mllr_matrix)
-
-        if args.base_dictionary:
-            args.base_dictionary = [Path(p) for p in args.base_dictionary]
-
-        if args.g2p_model:
-            args.g2p_model = Path(args.g2p_model)
-
-        if args.intent_graph:
-            args.intent_graph = Path(args.intent_graph)
-
-        if args.unknown_words:
-            args.unknown_words = Path(args.unknown_words)
-
-        def make_transcriber():
-            return PocketsphinxTranscriber(
-                args.acoustic_model,
-                args.dictionary,
-                args.language_model,
-                mllr_matrix=args.mllr_matrix,
-                debug=args.debug,
-            )
-
-        # Listen for messages
-        client = mqtt.Client()
-        hermes = AsrHermesMqtt(
-            client,
-            make_transcriber,
-            dictionary=args.dictionary,
-            language_model=args.language_model,
-            base_dictionaries=args.base_dictionary,
-            siteIds=args.siteId,
-            dictionary_word_transform=get_word_transform(args.dictionary_casing),
-            g2p_model=args.g2p_model,
-            g2p_word_transform=get_word_transform(args.g2p_casing),
-            unknown_words=args.unknown_words,
-            no_overwrite_train=args.no_overwrite_train,
-            loop=loop,
-        )
-
+    try:
         if args.intent_graph and (args.watch_delay > 0):
             _LOGGER.debug(
                 "Watching %s for changes (every %s second(s))",
@@ -164,11 +161,12 @@ def run_mqtt(args: argparse.Namespace):
         client.loop_start()
 
         # Run event loop
-        hermes.loop.run_forever()
+        asyncio.run(hermes.handle_messages_async())
     except KeyboardInterrupt:
         pass
     finally:
         _LOGGER.debug("Shutting down")
+        client.loop_stop()
 
 
 # -----------------------------------------------------------------------------

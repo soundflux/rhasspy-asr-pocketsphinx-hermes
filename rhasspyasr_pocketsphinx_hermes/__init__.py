@@ -1,5 +1,4 @@
 """Hermes MQTT server for Rhasspy ASR using Pocketsphinx"""
-import asyncio
 import gzip
 import logging
 import os
@@ -80,13 +79,11 @@ class AsrHermesMqtt(HermesClient):
         sample_width: int = 2,
         channels: int = 1,
         make_recorder: typing.Callable[[], VoiceCommandRecorder] = None,
-        loop=None,
     ):
         super().__init__(
             "rhasspyasr_pocketsphinx_hermes",
             client,
             siteIds=siteIds,
-            loop=loop,
             sample_rate=sample_rate,
             sample_width=sample_width,
             channels=channels,
@@ -130,6 +127,7 @@ class AsrHermesMqtt(HermesClient):
 
         # True if ASR system is enabled
         self.enabled = enabled
+        self.disabled_reasons: typing.Set[str] = set()
 
         # No timeout
         def default_recorder():
@@ -141,9 +139,6 @@ class AsrHermesMqtt(HermesClient):
         self.sessions: typing.Dict[str, SessionInfo] = {}
 
         self.first_audio: bool = True
-
-        # Event loop
-        self.loop = loop or asyncio.get_event_loop()
 
     # -------------------------------------------------------------------------
 
@@ -485,11 +480,16 @@ class AsrHermesMqtt(HermesClient):
         """Received message from MQTT broker."""
         # Check enable/disable messages
         if isinstance(message, AsrToggleOn):
-            self.enabled = True
-            self.first_audio = True
-            _LOGGER.debug("Enabled")
+            self.disabled_reasons.discard(message.reason)
+            if self.disabled_reasons:
+                _LOGGER.debug("Still disabled: %s", self.disabled_reasons)
+            else:
+                self.enabled = True
+                self.first_audio = True
+                _LOGGER.debug("Enabled")
         elif isinstance(message, AsrToggleOff):
             self.enabled = False
+            self.disabled_reasons.add(message.reason)
             _LOGGER.debug("Disabled")
         elif isinstance(message, AudioFrame):
             if self.enabled:
