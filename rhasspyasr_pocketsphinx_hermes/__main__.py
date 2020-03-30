@@ -148,18 +148,18 @@ def run_mqtt(args: argparse.Namespace):
         no_overwrite_train=args.no_overwrite_train,
     )
 
+    if args.intent_graph and (args.watch_delay > 0):
+        _LOGGER.debug(
+            "Watching %s for changes (every %s second(s))",
+            str(args.intent_graph),
+            args.watch_delay,
+        )
+
+    _LOGGER.debug("Connecting to %s:%s", args.host, args.port)
+    hermes_cli.connect(client, args)
+    client.loop_start()
+
     try:
-        if args.intent_graph and (args.watch_delay > 0):
-            _LOGGER.debug(
-                "Watching %s for changes (every %s second(s))",
-                str(args.intent_graph),
-                args.watch_delay,
-            )
-
-        _LOGGER.debug("Connecting to %s:%s", args.host, args.port)
-        hermes_cli.connect(client, args)
-        client.loop_start()
-
         # Run event loop
         asyncio.run(hermes.handle_messages_async())
     except KeyboardInterrupt:
