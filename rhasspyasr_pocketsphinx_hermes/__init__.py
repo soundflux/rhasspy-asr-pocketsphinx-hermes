@@ -79,6 +79,11 @@ class AsrHermesMqtt(HermesClient):
         sample_width: int = 2,
         channels: int = 1,
         make_recorder: typing.Callable[[], VoiceCommandRecorder] = None,
+        min_seconds: float = 1.0,
+        speech_seconds: float = 0.3,
+        silence_seconds: float = 0.5,
+        before_seconds: float = 0.5,
+        vad_mode: int = 3,
     ):
         super().__init__(
             "rhasspyasr_pocketsphinx_hermes",
@@ -131,7 +136,14 @@ class AsrHermesMqtt(HermesClient):
 
         # No timeout
         def default_recorder():
-            return WebRtcVadRecorder(max_seconds=None)
+            return WebRtcVadRecorder(
+                max_seconds=None,
+                vad_mode=vad_mode,
+                min_seconds=min_seconds,
+                speech_seconds=speech_seconds,
+                silence_seconds=silence_seconds,
+                before_seconds=before_seconds,
+            )
 
         self.make_recorder = make_recorder or default_recorder
 
