@@ -248,6 +248,10 @@ class AsrHermesMqtt(HermesClient):
             typing.Tuple[AsrAudioCaptured, typing.Dict[str, typing.Any]],
         ]
     ]:
+        # Don't process audio if no sessions
+        if not self.sessions:
+            return
+
         """Process single frame of WAV audio"""
         audio_data = self.maybe_convert_wav(frame_wav_bytes)
 
