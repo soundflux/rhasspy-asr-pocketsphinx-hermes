@@ -80,6 +80,7 @@ class AsrHermesMqtt(HermesClient):
         sample_width: int = 2,
         channels: int = 1,
         make_recorder: typing.Callable[[], VoiceCommandRecorder] = None,
+        skip_seconds: float = 0.0,
         min_seconds: float = 1.0,
         speech_seconds: float = 0.3,
         silence_seconds: float = 0.5,
@@ -140,6 +141,7 @@ class AsrHermesMqtt(HermesClient):
             return WebRtcVadRecorder(
                 max_seconds=None,
                 vad_mode=vad_mode,
+                skip_seconds=skip_seconds,
                 min_seconds=min_seconds,
                 speech_seconds=speech_seconds,
                 silence_seconds=silence_seconds,
@@ -248,11 +250,11 @@ class AsrHermesMqtt(HermesClient):
             typing.Tuple[AsrAudioCaptured, typing.Dict[str, typing.Any]],
         ]
     ]:
+        """Process single frame of WAV audio"""
         # Don't process audio if no sessions
         if not self.sessions:
             return
 
-        """Process single frame of WAV audio"""
         audio_data = self.maybe_convert_wav(frame_wav_bytes)
 
         if sessionId is None:
