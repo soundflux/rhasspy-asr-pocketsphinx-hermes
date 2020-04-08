@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Publish a WAV file to Hermes ASR service."""
 import argparse
 import io
 import json
@@ -19,6 +20,7 @@ TOPIC_TEXT_CAPTURED = "hermes/asr/textCaptured"
 
 
 def main():
+    """Main entry point."""
     parser = argparse.ArgumentParser(prog="publish_wav")
     parser.add_argument(
         "--site-id", default="default", help="Site ID to publish audio to"
@@ -103,7 +105,8 @@ def main():
 
                         # Wrap chunk in WAV
                         with io.BytesIO() as out_io:
-                            with wave.open(out_io, "wb") as out_wav:
+                            out_wav: wave.Wave_write = wave.open(out_io, "wb")
+                            with out_wav:
                                 out_wav.setframerate(in_wav.getframerate())
                                 out_wav.setsampwidth(in_wav.getsampwidth())
                                 out_wav.setnchannels(in_wav.getnchannels())
