@@ -39,8 +39,8 @@ _LOGGER = logging.getLogger("rhasspyasr_pocketsphinx_hermes")
 class SessionInfo:
     """Information about an open session."""
 
-    sessionId: str
     start_listening: AsrStartListening
+    session_id: typing.Optional[str] = None
     recorder: typing.Optional[VoiceCommandRecorder] = None
     transcription_sent: bool = False
     num_wav_bytes: int = 0
@@ -74,7 +74,7 @@ class AsrHermesMqtt(HermesClient):
         g2p_word_transform: typing.Optional[typing.Callable[[str], str]] = None,
         unknown_words: typing.Optional[Path] = None,
         no_overwrite_train: bool = False,
-        siteIds: typing.Optional[typing.List[str]] = None,
+        site_ids: typing.Optional[typing.List[str]] = None,
         enabled: bool = True,
         sample_rate: int = 16000,
         sample_width: int = 2,
@@ -90,7 +90,7 @@ class AsrHermesMqtt(HermesClient):
         super().__init__(
             "rhasspyasr_pocketsphinx_hermes",
             client,
-            siteIds=siteIds,
+            site_ids=site_ids,
             sample_rate=sample_rate,
             sample_width=sample_width,
             channels=channels,
@@ -151,7 +151,7 @@ class AsrHermesMqtt(HermesClient):
         self.make_recorder = make_recorder or default_recorder
 
         # WAV buffers for each session
-        self.sessions: typing.Dict[str, SessionInfo] = {}
+        self.sessions: typing.Dict[typing.Optional[str], SessionInfo] = {}
 
         self.first_audio: bool = True
 
@@ -159,18 +159,20 @@ class AsrHermesMqtt(HermesClient):
 
     async def start_listening(self, message: AsrStartListening) -> None:
         """Start recording audio data for a session."""
-        session = self.sessions.get(message.sessionId)
+        session = self.sessions.get(message.session_id)
         if not session:
-            session = SessionInfo(sessionId=message.sessionId, start_listening=message)
+            session = SessionInfo(
+                session_id=message.session_id, start_listening=message
+            )
 
-            if message.stopOnSilence:
+            if message.stop_on_silence:
                 # Use voice command recorder
                 session.recorder = self.make_recorder()
             else:
                 # Use buffer
                 session.audio_buffer = bytes()
 
-            self.sessions[message.sessionId] = session
+            self.sessions[message.session_id] = session
 
         # Start session
         assert session
@@ -178,7 +180,7 @@ class AsrHermesMqtt(HermesClient):
         if session.recorder:
             session.recorder.start()
 
-        _LOGGER.debug("Starting listening (sessionId=%s)", message.sessionId)
+        _LOGGER.debug("Starting listening (session_id=%s)", message.session_id)
         self.first_audio = True
 
     async def stop_listening(
@@ -192,7 +194,7 @@ class AsrHermesMqtt(HermesClient):
     ]:
         """Stop recording audio data for a session."""
         try:
-            session = self.sessions.pop(message.sessionId, None)
+            session = self.sessions.pop(message.session_id, None)
             if session:
                 # Stop session
                 if session.recorder:
@@ -206,7 +208,7 @@ class AsrHermesMqtt(HermesClient):
                 _LOGGER.debug(
                     "Received a total of %s byte(s) for WAV data for session %s",
                     session.num_wav_bytes,
-                    message.sessionId,
+                    message.session_id,
                 )
 
                 if not session.transcription_sent:
@@ -216,33 +218,36 @@ class AsrHermesMqtt(HermesClient):
                     yield (
                         await self.transcribe(
                             wav_bytes,
-                            siteId=message.siteId,
-                            sessionId=message.sessionId,
+                            site_id=message.site_id,
+                            session_id=message.session_id,
                         )
                     )
 
-                    if session.start_listening.sendAudioCaptured:
+                    if session.start_listening.send_audio_captured:
                         # Send audio data
                         yield (
                             AsrAudioCaptured(wav_bytes=wav_bytes),
-                            {"siteId": message.siteId, "sessionId": message.sessionId},
+                            {
+                                "site_id": message.site_id,
+                                "session_id": message.session_id,
+                            },
                         )
 
-            _LOGGER.debug("Stopping listening (sessionId=%s)", message.sessionId)
+            _LOGGER.debug("Stopping listening (session_id=%s)", message.session_id)
         except Exception as e:
             _LOGGER.exception("stop_listening")
             yield AsrError(
                 error=str(e),
                 context=repr(self.transcriber),
-                siteId=message.siteId,
-                sessionId=message.sessionId,
+                site_id=message.site_id,
+                session_id=message.session_id,
             )
 
     async def handle_audio_frame(
         self,
         frame_wav_bytes: bytes,
-        siteId: str = "default",
-        sessionId: typing.Optional[str] = None,
+        site_id: str = "default",
+        session_id: typing.Optional[str] = None,
     ) -> typing.AsyncIterable[
         typing.Union[
             AsrTextCaptured,
@@ -257,18 +262,18 @@ class AsrHermesMqtt(HermesClient):
 
         audio_data = self.maybe_convert_wav(frame_wav_bytes)
 
-        if sessionId is None:
+        if session_id is None:
             # Add to every open session
             target_sessions = list(self.sessions.items())
         else:
             # Add to single session
-            target_sessions = [(sessionId, self.sessions[sessionId])]
+            target_sessions = [(session_id, self.sessions[session_id])]
 
         # Add audio to session(s)
         for target_id, session in target_sessions:
             try:
-                # Skip if siteId doesn't match
-                if session.start_listening.siteId != siteId:
+                # Skip if site_id doesn't match
+                if session.start_listening.site_id != site_id:
                     continue
 
                 session.num_wav_bytes += len(frame_wav_bytes)
@@ -288,15 +293,15 @@ class AsrHermesMqtt(HermesClient):
 
                         yield (
                             await self.transcribe(
-                                wav_bytes, siteId=siteId, sessionId=target_id
+                                wav_bytes, site_id=site_id, session_id=target_id
                             )
                         )
 
-                        if session.start_listening.sendAudioCaptured:
+                        if session.start_listening.send_audio_captured:
                             # Send audio data
                             yield (
                                 AsrAudioCaptured(wav_bytes=wav_bytes),
-                                {"siteId": siteId, "sessionId": target_id},
+                                {"site_id": site_id, "session_id": target_id},
                             )
 
                         # Reset session (but keep open)
@@ -311,12 +316,12 @@ class AsrHermesMqtt(HermesClient):
                 yield AsrError(
                     error=str(e),
                     context=repr(self.transcriber),
-                    siteId=siteId,
-                    sessionId=target_id,
+                    site_id=site_id,
+                    session_id=target_id,
                 )
 
     async def transcribe(
-        self, wav_bytes: bytes, siteId: str = "default", sessionId: str = ""
+        self, wav_bytes: bytes, site_id: str, session_id: typing.Optional[str] = None
     ) -> AsrTextCaptured:
         """Transcribe audio data and publish captured text."""
         try:
@@ -331,8 +336,8 @@ class AsrHermesMqtt(HermesClient):
                     text=transcription.text,
                     likelihood=transcription.likelihood,
                     seconds=transcription.transcribe_seconds,
-                    siteId=siteId,
-                    sessionId=sessionId,
+                    site_id=site_id,
+                    session_id=session_id,
                 )
 
             _LOGGER.warning("Received empty transcription")
@@ -342,11 +347,11 @@ class AsrHermesMqtt(HermesClient):
 
         # Empty transcription
         return AsrTextCaptured(
-            text="", likelihood=0, seconds=0, siteId=siteId, sessionId=sessionId
+            text="", likelihood=0, seconds=0, site_id=site_id, session_id=session_id
         )
 
     async def handle_train(
-        self, train: AsrTrain, siteId: str = "default"
+        self, train: AsrTrain, site_id: str = "default"
     ) -> typing.AsyncIterable[
         typing.Union[typing.Tuple[AsrTrainSuccess, TopicArgs], AsrError]
     ]:
@@ -404,14 +409,14 @@ class AsrHermesMqtt(HermesClient):
             _LOGGER.debug("Re-loading transcriber")
             self.transcriber = self.make_transcriber()
 
-            yield (AsrTrainSuccess(id=train.id), {"siteId": siteId})
+            yield (AsrTrainSuccess(id=train.id), {"site_id": site_id})
         except Exception as e:
             _LOGGER.exception("handle_train")
             yield AsrError(
                 error=str(e),
                 context=repr(self.transcriber),
-                siteId=siteId,
-                sessionId=train.id,
+                site_id=site_id,
+                session_id=train.id,
             )
 
     async def handle_pronounce(
@@ -420,7 +425,10 @@ class AsrHermesMqtt(HermesClient):
         """Looks up or guesses word pronunciation(s)."""
         try:
             result = G2pPhonemes(
-                id=pronounce.id, siteId=pronounce.siteId, sessionId=pronounce.sessionId
+                word_phonemes={},
+                id=pronounce.id,
+                site_id=pronounce.site_id,
+                session_id=pronounce.session_id,
             )
 
             # Load base dictionaries
@@ -445,7 +453,7 @@ class AsrHermesMqtt(HermesClient):
                     word_prons = pronunciations.get(word)
                     if word_prons:
                         # Use dictionary pronunciations
-                        result.wordPhonemes[word] = [
+                        result.word_phonemes[word] = [
                             G2pPronunciation(phonemes=p, guessed=False)
                             for p in word_prons
                         ]
@@ -463,16 +471,16 @@ class AsrHermesMqtt(HermesClient):
                         missing_words,
                         self.g2p_model,
                         g2p_word_transform=self.g2p_word_transform,
-                        num_guesses=pronounce.numGuesses,
+                        num_guesses=pronounce.num_guesses,
                     )
 
                     # Add guesses to result
                     for guess_word, guess_phonemes in guesses:
-                        result_phonemes = result.wordPhonemes.get(guess_word) or []
+                        result_phonemes = result.word_phonemes.get(guess_word) or []
                         result_phonemes.append(
                             G2pPronunciation(phonemes=guess_phonemes, guessed=True)
                         )
-                        result.wordPhonemes[guess_word] = result_phonemes
+                        result.word_phonemes[guess_word] = result_phonemes
                 else:
                     _LOGGER.warning("No g2p model. Cannot guess pronunciations.")
 
@@ -482,9 +490,8 @@ class AsrHermesMqtt(HermesClient):
             yield G2pError(
                 error=str(e),
                 context=repr(self.transcriber),
-                id=pronounce.id,
-                siteId=pronounce.siteId,
-                sessionId=pronounce.sessionId,
+                site_id=pronounce.site_id,
+                session_id=pronounce.session_id,
             )
 
     # -------------------------------------------------------------------------
@@ -492,8 +499,8 @@ class AsrHermesMqtt(HermesClient):
     async def on_message(
         self,
         message: Message,
-        siteId: typing.Optional[str] = None,
-        sessionId: typing.Optional[str] = None,
+        site_id: typing.Optional[str] = None,
+        session_id: typing.Optional[str] = None,
         topic: typing.Optional[str] = None,
     ) -> GeneratorType:
         """Received message from MQTT broker."""
@@ -517,27 +524,27 @@ class AsrHermesMqtt(HermesClient):
             _LOGGER.debug("Disabled")
         elif isinstance(message, AudioFrame):
             if self.enabled:
-                assert siteId, "Missing siteId"
+                assert site_id, "Missing site_id"
                 if self.first_audio:
                     _LOGGER.debug("Receiving audio")
                     self.first_audio = False
 
                 # Add to all active sessions
                 async for frame_result in self.handle_audio_frame(
-                    message.wav_bytes, siteId=siteId
+                    message.wav_bytes, site_id=site_id
                 ):
                     yield frame_result
         elif isinstance(message, AudioSessionFrame):
             if self.enabled:
-                assert siteId and sessionId, "Missing siteId or sessionId"
-                if sessionId in self.sessions:
+                assert site_id and session_id, "Missing site_id or session_id"
+                if session_id in self.sessions:
                     if self.first_audio:
                         _LOGGER.debug("Receiving audio")
                         self.first_audio = False
 
                     # Add to specific session only
                     async for session_frame_result in self.handle_audio_frame(
-                        message.wav_bytes, siteId=siteId, sessionId=sessionId
+                        message.wav_bytes, site_id=site_id, session_id=session_id
                     ):
                         yield session_frame_result
         elif isinstance(message, AsrStartListening):
@@ -548,9 +555,9 @@ class AsrHermesMqtt(HermesClient):
             async for stop_result in self.stop_listening(message):
                 yield stop_result
         elif isinstance(message, AsrTrain):
-            # rhasspy/asr/<siteId>/train
-            assert siteId, "Missing siteId"
-            async for train_result in self.handle_train(message, siteId=siteId):
+            # rhasspy/asr/<site_id>/train
+            assert site_id, "Missing site_id"
+            async for train_result in self.handle_train(message, site_id=site_id):
                 yield train_result
         elif isinstance(message, G2pPronounce):
             # rhasspy/g2p/pronounce

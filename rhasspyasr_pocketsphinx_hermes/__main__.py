@@ -190,7 +190,7 @@ def run_mqtt(args: argparse.Namespace):
         silence_seconds=args.voice_silence_seconds,
         before_seconds=args.voice_before_seconds,
         vad_mode=args.voice_sensitivity,
-        siteIds=args.siteId,
+        site_ids=args.site_id,
     )
 
     if args.intent_graph and (args.watch_delay > 0):
