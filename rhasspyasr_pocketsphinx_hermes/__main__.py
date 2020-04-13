@@ -2,6 +2,8 @@
 import argparse
 import asyncio
 import logging
+import signal
+import tempfile
 import typing
 from pathlib import Path
 
@@ -56,9 +58,6 @@ def get_args() -> argparse.Namespace:
     parser.add_argument(
         "--mllr-matrix", default=None, help="Path to read tuned MLLR matrix file"
     )
-    parser.add_argument(
-        "--intent-graph", help="Path to write intent graph JSON file (training)"
-    )
 
     parser.add_argument(
         "--base-dictionary",
@@ -83,6 +82,7 @@ def get_args() -> argparse.Namespace:
         action="store_true",
         help="Don't overwrite dictionary/language model during training",
     )
+    parser.add_argument("--intent-graph", help="Path to intent graph (gzipped pickle)")
 
     # Silence detection
     parser.add_argument(
@@ -162,56 +162,58 @@ def run_mqtt(args: argparse.Namespace):
     if args.unknown_words:
         args.unknown_words = Path(args.unknown_words)
 
-    def make_transcriber():
+    def make_transcriber(language_model: Path):
         return PocketsphinxTranscriber(
             args.acoustic_model,
             args.dictionary,
-            args.language_model,
+            language_model,
             mllr_matrix=args.mllr_matrix,
             debug=args.debug,
         )
 
     # Listen for messages
     client = mqtt.Client()
-    hermes = AsrHermesMqtt(
-        client,
-        make_transcriber,
-        dictionary=args.dictionary,
-        language_model=args.language_model,
-        base_dictionaries=args.base_dictionary,
-        dictionary_word_transform=get_word_transform(args.dictionary_casing),
-        g2p_model=args.g2p_model,
-        g2p_word_transform=get_word_transform(args.g2p_casing),
-        unknown_words=args.unknown_words,
-        no_overwrite_train=args.no_overwrite_train,
-        skip_seconds=args.voice_skip_seconds,
-        min_seconds=args.voice_min_seconds,
-        speech_seconds=args.voice_speech_seconds,
-        silence_seconds=args.voice_silence_seconds,
-        before_seconds=args.voice_before_seconds,
-        vad_mode=args.voice_sensitivity,
-        site_ids=args.site_id,
-    )
 
-    if args.intent_graph and (args.watch_delay > 0):
-        _LOGGER.debug(
-            "Watching %s for changes (every %s second(s))",
-            str(args.intent_graph),
-            args.watch_delay,
+    lm_cache_dir = tempfile.TemporaryDirectory(prefix="rhasspyasr_pocketsphinx_hermes")
+
+    # Ensure temp dir is cleaned up on exit
+    signal.signal(signal.SIGTERM, lambda signum, frame: lm_cache_dir.cleanup())
+
+    with lm_cache_dir:
+        hermes = AsrHermesMqtt(
+            client,
+            make_transcriber,
+            dictionary=args.dictionary,
+            language_model=args.language_model,
+            base_dictionaries=args.base_dictionary,
+            dictionary_word_transform=get_word_transform(args.dictionary_casing),
+            g2p_model=args.g2p_model,
+            g2p_word_transform=get_word_transform(args.g2p_casing),
+            unknown_words=args.unknown_words,
+            no_overwrite_train=args.no_overwrite_train,
+            intent_graph_path=args.intent_graph,
+            skip_seconds=args.voice_skip_seconds,
+            min_seconds=args.voice_min_seconds,
+            speech_seconds=args.voice_speech_seconds,
+            silence_seconds=args.voice_silence_seconds,
+            before_seconds=args.voice_before_seconds,
+            vad_mode=args.voice_sensitivity,
+            site_ids=args.site_id,
+            lm_cache_dir=lm_cache_dir.name,
         )
 
-    _LOGGER.debug("Connecting to %s:%s", args.host, args.port)
-    hermes_cli.connect(client, args)
-    client.loop_start()
+        _LOGGER.debug("Connecting to %s:%s", args.host, args.port)
+        hermes_cli.connect(client, args)
+        client.loop_start()
 
-    try:
-        # Run event loop
-        asyncio.run(hermes.handle_messages_async())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        _LOGGER.debug("Shutting down")
-        client.loop_stop()
+        try:
+            # Run event loop
+            asyncio.run(hermes.handle_messages_async())
+        except KeyboardInterrupt:
+            pass
+        finally:
+            _LOGGER.debug("Shutting down")
+            client.loop_stop()
 
 
 # -----------------------------------------------------------------------------

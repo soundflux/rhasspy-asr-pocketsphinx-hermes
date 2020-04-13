@@ -2,6 +2,7 @@
 import gzip
 import logging
 import os
+import tempfile
 import typing
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -46,6 +47,9 @@ class SessionInfo:
     num_wav_bytes: int = 0
     audio_buffer: typing.Optional[bytes] = None
 
+    # Custom transcriber for filtered intents
+    transcriber: typing.Optional[Transcriber] = None
+
 
 @dataclass
 class PronunciationDictionary:
@@ -65,7 +69,7 @@ class AsrHermesMqtt(HermesClient):
     def __init__(
         self,
         client,
-        transcriber_factory: typing.Callable[[], Transcriber],
+        transcriber_factory: typing.Callable[[Path], Transcriber],
         dictionary: Path,
         language_model: Path,
         base_dictionaries: typing.Optional[typing.List[Path]] = None,
@@ -74,6 +78,7 @@ class AsrHermesMqtt(HermesClient):
         g2p_word_transform: typing.Optional[typing.Callable[[str], str]] = None,
         unknown_words: typing.Optional[Path] = None,
         no_overwrite_train: bool = False,
+        intent_graph_path: typing.Optional[Path] = None,
         site_ids: typing.Optional[typing.List[str]] = None,
         enabled: bool = True,
         sample_rate: int = 16000,
@@ -86,6 +91,7 @@ class AsrHermesMqtt(HermesClient):
         silence_seconds: float = 0.5,
         before_seconds: float = 0.5,
         vad_mode: int = 3,
+        lm_cache_dir: typing.Optional[typing.Union[str, Path]] = None,
     ):
         super().__init__(
             "rhasspyasr_pocketsphinx_hermes",
@@ -110,9 +116,18 @@ class AsrHermesMqtt(HermesClient):
         self.make_transcriber = transcriber_factory
         self.transcriber: typing.Optional[Transcriber] = None
 
+        # Intent graph from training
+        self.intent_graph_path: typing.Optional[Path] = intent_graph_path
+        self.intent_graph: typing.Optional[nx.DiGraph] = None
+
         # Files to write during training
         self.dictionary = dictionary
         self.language_model = language_model
+
+        # Cache for filtered language model
+        self.lm_cache_dir = lm_cache_dir
+        self.lm_cache_paths: typing.Dict[str, Path] = {}
+        self.lm_cache_transcribers: typing.Dict[str, Transcriber] = {}
 
         # Pronunciation dictionaries and word transform function
         base_dictionaries = base_dictionaries or []
@@ -172,6 +187,10 @@ class AsrHermesMqtt(HermesClient):
                 # Use buffer
                 session.audio_buffer = bytes()
 
+            if message.intent_filter:
+                # Load filtered language model
+                self.maybe_load_filtered_transcriber(session, message.intent_filter)
+
             self.sessions[message.session_id] = session
 
         # Start session
@@ -218,6 +237,7 @@ class AsrHermesMqtt(HermesClient):
                     yield (
                         await self.transcribe(
                             wav_bytes,
+                            transcriber=session.transcriber,
                             site_id=message.site_id,
                             session_id=message.session_id,
                         )
@@ -293,7 +313,10 @@ class AsrHermesMqtt(HermesClient):
 
                         yield (
                             await self.transcribe(
-                                wav_bytes, site_id=site_id, session_id=target_id
+                                wav_bytes,
+                                transcriber=session.transcriber,
+                                site_id=site_id,
+                                session_id=target_id,
                             )
                         )
 
@@ -321,31 +344,33 @@ class AsrHermesMqtt(HermesClient):
                 )
 
     async def transcribe(
-        self, wav_bytes: bytes, site_id: str, session_id: typing.Optional[str] = None
+        self,
+        wav_bytes: bytes,
+        site_id: str,
+        transcriber: typing.Optional[Transcriber] = None,
+        session_id: typing.Optional[str] = None,
     ) -> AsrTextCaptured:
         """Transcribe audio data and publish captured text."""
-        try:
-            if not self.transcriber:
-                self.transcriber = self.make_transcriber()
+        if not transcriber and not self.transcriber:
+            # Load default transcriber
+            self.transcriber = self.make_transcriber(self.language_model)
 
-            _LOGGER.debug("Transcribing %s byte(s) of audio data", len(wav_bytes))
-            transcription = self.transcriber.transcribe_wav(wav_bytes)
-            if transcription:
-                # Actual transcription
-                return AsrTextCaptured(
-                    text=transcription.text,
-                    likelihood=transcription.likelihood,
-                    seconds=transcription.transcribe_seconds,
-                    site_id=site_id,
-                    session_id=session_id,
-                )
+        transcriber = transcriber or self.transcriber
+        assert transcriber, "No transciber"
 
-            _LOGGER.warning("Received empty transcription")
+        _LOGGER.debug("Transcribing %s byte(s) of audio data", len(wav_bytes))
+        transcription = transcriber.transcribe_wav(wav_bytes)
+        if transcription:
+            # Actual transcription
+            return AsrTextCaptured(
+                text=transcription.text,
+                likelihood=transcription.likelihood,
+                seconds=transcription.transcribe_seconds,
+                site_id=site_id,
+                session_id=session_id,
+            )
 
-        except Exception:
-            _LOGGER.exception("transcribe")
-
-        # Empty transcription
+        _LOGGER.warning("Received empty transcription")
         return AsrTextCaptured(
             text="", likelihood=0, seconds=0, site_id=site_id, session_id=session_id
         )
@@ -386,15 +411,26 @@ class AsrHermesMqtt(HermesClient):
                 for word in base_dict.pronunciations:
                     pronunciations[word].extend(base_dict.pronunciations[word])
 
-            if not self.no_overwrite_train:
-                _LOGGER.debug("Loading %s", train.graph_path)
-                with gzip.GzipFile(train.graph_path, mode="rb") as graph_gzip:
-                    graph = nx.readwrite.gpickle.read_gpickle(graph_gzip)
+            # Load intent graph
+            _LOGGER.debug("Loading %s", train.graph_path)
+            with gzip.GzipFile(train.graph_path, mode="rb") as graph_gzip:
+                self.intent_graph = nx.readwrite.gpickle.read_gpickle(graph_gzip)
 
-                # Generate dictionary/language model
+            # Clean LM cache completely
+            for lm_path in self.lm_cache_paths.values():
+                try:
+                    lm_path.unlink()
+                except Exception:
+                    pass
+
+            self.lm_cache_paths = {}
+            self.lm_cache_transcribers = {}
+
+            # Generate dictionary/language model
+            if not self.no_overwrite_train:
                 _LOGGER.debug("Starting training")
                 rhasspyasr_pocketsphinx.train(
-                    graph,
+                    self.intent_graph,
                     self.dictionary,
                     self.language_model,
                     pronunciations,
@@ -407,7 +443,7 @@ class AsrHermesMqtt(HermesClient):
                 _LOGGER.warning("Not overwriting dictionary/language model")
 
             _LOGGER.debug("Re-loading transcriber")
-            self.transcriber = self.make_transcriber()
+            self.transcriber = self.make_transcriber(self.language_model)
 
             yield (AsrTrainSuccess(id=train.id), {"site_id": site_id})
         except Exception as e:
@@ -494,16 +530,75 @@ class AsrHermesMqtt(HermesClient):
                 session_id=pronounce.session_id,
             )
 
+    def cleanup(self):
+        """Delete any temporary files."""
+        for lm_path in self.lm_cache_paths.values():
+            try:
+                lm_path.unlink()
+            except Exception:
+                pass
+
+    def maybe_load_filtered_transcriber(
+        self, session: SessionInfo, intent_filter: typing.List[str]
+    ):
+        """Create/load a language model with only filtered intents."""
+        lm_key = ",".join(intent_filter)
+
+        # Try to look up in cache
+        lm_transcriber = self.lm_cache_transcribers.get(lm_key)
+
+        if not lm_transcriber:
+            lm_path = self.lm_cache_paths.get(lm_key)
+
+            if not lm_path:
+                # Create a new temporary file
+                lm_file = tempfile.NamedTemporaryFile(
+                    suffix=".arpa", dir=self.lm_cache_dir, delete=False
+                )
+                lm_path = Path(lm_file.name)
+                self.lm_cache_paths[lm_key] = lm_path
+
+            # Function to filter intents by name
+            def intent_filter_func(intent_name: str) -> bool:
+                return intent_name in intent_filter
+
+            # Load intent graph and create transcriber
+            if (
+                not self.intent_graph
+                and self.intent_graph_path
+                and self.intent_graph_path.is_file()
+            ):
+                # Load intent graph
+                _LOGGER.debug("Loading %s", self.intent_graph_path)
+                with gzip.GzipFile(self.intent_graph_path, mode="rb") as graph_gzip:
+                    self.intent_graph = nx.readwrite.gpickle.read_gpickle(graph_gzip)
+
+            if self.intent_graph:
+                # Create language model
+                _LOGGER.debug("Converting to ARPA language model")
+                rhasspynlu.arpa_lm.graph_to_arpa(
+                    self.intent_graph, lm_path, intent_filter=intent_filter_func
+                )
+
+                # Load transcriber
+                lm_transcriber = self.make_transcriber(lm_path)
+                self.lm_cache_transcribers[lm_key] = lm_transcriber
+            else:
+                # Use full transcriber
+                _LOGGER.warning("No intent graph loaded. Cannot filter intents.")
+
+        session.transcriber = lm_transcriber
+
     # -------------------------------------------------------------------------
 
-    async def on_message(
+    async def on_message_blocking(
         self,
         message: Message,
         site_id: typing.Optional[str] = None,
         session_id: typing.Optional[str] = None,
         topic: typing.Optional[str] = None,
     ) -> GeneratorType:
-        """Received message from MQTT broker."""
+        """Received message from MQTT broker (blocking)."""
         # Check enable/disable messages
         if isinstance(message, AsrToggleOn):
             if message.reason == AsrToggleReason.UNKNOWN:
@@ -548,7 +643,7 @@ class AsrHermesMqtt(HermesClient):
                     ):
                         yield session_frame_result
         elif isinstance(message, AsrStartListening):
-            # hermes/asr/startListening
+            # Handle blocking
             await self.start_listening(message)
         elif isinstance(message, AsrStopListening):
             # hermes/asr/stopListening
