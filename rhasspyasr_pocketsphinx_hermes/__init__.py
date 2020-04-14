@@ -28,6 +28,7 @@ from rhasspyhermes.audioserver import AudioFrame, AudioSessionFrame
 from rhasspyhermes.base import Message
 from rhasspyhermes.client import GeneratorType, HermesClient, TopicArgs
 from rhasspyhermes.g2p import G2pError, G2pPhonemes, G2pPronounce, G2pPronunciation
+from rhasspyhermes.nlu import AsrToken, AsrTokenTime
 from rhasspynlu.g2p import PronunciationsType
 from rhasspysilence import VoiceCommandRecorder, VoiceCommandResult, WebRtcVadRecorder
 
@@ -356,11 +357,35 @@ class AsrHermesMqtt(HermesClient):
             self.transcriber = self.make_transcriber(self.language_model)
 
         transcriber = transcriber or self.transcriber
-        assert transcriber, "No transciber"
+        assert transcriber, "No transcriber"
 
         _LOGGER.debug("Transcribing %s byte(s) of audio data", len(wav_bytes))
         transcription = transcriber.transcribe_wav(wav_bytes)
         if transcription:
+            _LOGGER.debug(transcription)
+            asr_tokens: typing.Optional[typing.List[typing.List[AsrToken]]] = None
+
+            if transcription.tokens:
+                # Only one level of ASR tokens
+                asr_inner_tokens: typing.List[AsrToken] = []
+                asr_tokens = [asr_inner_tokens]
+                range_start = 0
+                for ps_token in transcription.tokens:
+                    range_end = range_start + len(ps_token.token) + 1
+                    asr_inner_tokens.append(
+                        AsrToken(
+                            value=ps_token.token,
+                            confidence=ps_token.likelihood,
+                            range_start=range_start,
+                            range_end=range_start + len(ps_token.token) + 1,
+                            time=AsrTokenTime(
+                                start=ps_token.start_time, end=ps_token.end_time
+                            ),
+                        )
+                    )
+
+                    range_start = range_end
+
             # Actual transcription
             return AsrTextCaptured(
                 text=transcription.text,
@@ -368,6 +393,7 @@ class AsrHermesMqtt(HermesClient):
                 seconds=transcription.transcribe_seconds,
                 site_id=site_id,
                 session_id=session_id,
+                asr_tokens=asr_tokens,
             )
 
         _LOGGER.warning("Received empty transcription")
