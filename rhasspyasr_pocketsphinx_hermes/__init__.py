@@ -80,6 +80,9 @@ class AsrHermesMqtt(HermesClient):
         unknown_words: typing.Optional[Path] = None,
         no_overwrite_train: bool = False,
         intent_graph_path: typing.Optional[Path] = None,
+        base_language_model_fst: typing.Optional[Path] = None,
+        base_language_model_weight: float = 0,
+        mixed_language_model_fst: typing.Optional[Path] = None,
         site_ids: typing.Optional[typing.List[str]] = None,
         enabled: bool = True,
         sample_rate: int = 16000,
@@ -144,6 +147,11 @@ class AsrHermesMqtt(HermesClient):
 
         # Path to write missing words and guessed pronunciations
         self.unknown_words = unknown_words
+
+        # Mixed language model
+        self.base_language_model_fst = base_language_model_fst
+        self.base_language_model_weight = base_language_model_weight
+        self.mixed_language_model_fst = mixed_language_model_fst
 
         # If True, dictionary and language model won't be overwritten during training
         self.no_overwrite_train = no_overwrite_train
@@ -464,6 +472,9 @@ class AsrHermesMqtt(HermesClient):
                     g2p_model=self.g2p_model,
                     g2p_word_transform=self.g2p_word_transform,
                     missing_words_path=self.unknown_words,
+                    base_language_model_fst=self.base_language_model_fst,
+                    base_language_model_weight=self.base_language_model_weight,
+                    mixed_language_model_fst=self.mixed_language_model_fst,
                 )
             else:
                 _LOGGER.warning("Not overwriting dictionary/language model")

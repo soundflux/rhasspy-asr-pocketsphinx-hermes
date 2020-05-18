@@ -2,7 +2,6 @@
 import argparse
 import asyncio
 import logging
-import tempfile
 import typing
 from pathlib import Path
 
@@ -83,6 +82,22 @@ def get_args() -> argparse.Namespace:
     )
     parser.add_argument("--intent-graph", help="Path to intent graph (gzipped pickle)")
 
+    # Mixed language modeling
+    parser.add_argument(
+        "--base-language-model-fst",
+        help="Path to base language model FST (training, mixed)",
+    )
+    parser.add_argument(
+        "--base-language-model-weight",
+        type=float,
+        default=0,
+        help="Weight to give base langauge model (training, mixed)",
+    )
+    parser.add_argument(
+        "--mixed-language-model-fst",
+        help="Path to write mixed langauge model FST (training, mixed)",
+    )
+
     # Silence detection
     parser.add_argument(
         "--voice-skip-seconds",
@@ -161,6 +176,12 @@ def run_mqtt(args: argparse.Namespace):
     if args.unknown_words:
         args.unknown_words = Path(args.unknown_words)
 
+    if args.base_language_model_fst:
+        args.base_language_model_fst = Path(args.base_language_model_fst)
+
+    if args.mixed_language_model_fst:
+        args.mixed_language_model_fst = Path(args.mixed_language_model_fst)
+
     def make_transcriber(language_model: Path):
         return PocketsphinxTranscriber(
             args.acoustic_model,
@@ -184,6 +205,9 @@ def run_mqtt(args: argparse.Namespace):
         unknown_words=args.unknown_words,
         no_overwrite_train=args.no_overwrite_train,
         intent_graph_path=args.intent_graph,
+        base_language_model_fst=args.base_language_model_fst,
+        base_language_model_weight=args.base_language_model_weight,
+        mixed_language_model_fst=args.mixed_language_model_fst,
         skip_seconds=args.voice_skip_seconds,
         min_seconds=args.voice_min_seconds,
         speech_seconds=args.voice_speech_seconds,
@@ -205,7 +229,7 @@ def run_mqtt(args: argparse.Namespace):
     finally:
         _LOGGER.debug("Shutting down")
         client.loop_stop()
-        client.cleanup()
+        hermes.cleanup()
 
 
 # -----------------------------------------------------------------------------
