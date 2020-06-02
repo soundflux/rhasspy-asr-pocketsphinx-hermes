@@ -249,6 +249,7 @@ class AsrHermesMqtt(HermesClient):
                             transcriber=session.transcriber,
                             site_id=message.site_id,
                             session_id=message.session_id,
+                            lang=session.start_listening.lang,
                         )
                     )
 
@@ -326,6 +327,7 @@ class AsrHermesMqtt(HermesClient):
                                 transcriber=session.transcriber,
                                 site_id=site_id,
                                 session_id=target_id,
+                                lang=session.start_listening.lang,
                             )
                         )
 
@@ -358,6 +360,7 @@ class AsrHermesMqtt(HermesClient):
         site_id: str,
         transcriber: typing.Optional[Transcriber] = None,
         session_id: typing.Optional[str] = None,
+        lang: typing.Optional[str] = None,
     ) -> AsrTextCaptured:
         """Transcribe audio data and publish captured text."""
         if not transcriber and not self.transcriber:
@@ -402,11 +405,17 @@ class AsrHermesMqtt(HermesClient):
                 site_id=site_id,
                 session_id=session_id,
                 asr_tokens=asr_tokens,
+                lang=lang,
             )
 
         _LOGGER.warning("Received empty transcription")
         return AsrTextCaptured(
-            text="", likelihood=0, seconds=0, site_id=site_id, session_id=session_id
+            text="",
+            likelihood=0,
+            seconds=0,
+            site_id=site_id,
+            session_id=session_id,
+            lang=lang,
         )
 
     async def handle_train(
