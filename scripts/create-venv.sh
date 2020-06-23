@@ -9,8 +9,6 @@ fi
 this_dir="$( cd "$( dirname "$0" )" && pwd )"
 src_dir="$(realpath "${this_dir}/..")"
 
-python_name="$(basename "${src_dir}" | sed -e 's/-//' | sed -e 's/-/_/g')"
-
 # -----------------------------------------------------------------------------
 
 venv="${src_dir}/.venv"
@@ -30,8 +28,6 @@ source "${venv}/bin/activate"
 echo "Installing Python dependencies"
 pip3 ${PIP_INSTALL} --upgrade pip
 pip3 ${PIP_INSTALL} --upgrade wheel setuptools
-
-pip3 ${PIP_INSTALL} "${download}/pocketsphinx-python.tar.gz"
 
 # Install local Rhasspy dependencies if available
 grep '^rhasspy-' "${src_dir}/requirements.txt" | \
