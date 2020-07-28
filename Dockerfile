@@ -36,7 +36,7 @@ ENV LANG C.UTF-8
 RUN apt-get update && \
     apt-get install --no-install-recommends --yes \
         python3 python3-dev python3-setuptools python3-pip python3-venv \
-        build-essential \
+        build-essential swig \
         curl ca-certificates
 
 FROM build-ubuntu as build-amd64
@@ -56,7 +56,7 @@ ENV LANG C.UTF-8
 # ENDIF
 
 RUN install_packages \
-        curl ca-certificates
+        swig curl ca-certificates
 
 # -----------------------------------------------------------------------------
 # Build
@@ -70,24 +70,20 @@ ENV APP_DIR=/usr/lib/rhasspy-asr-pocketsphinx-hermes
 ENV BUILD_DIR=/build
 
 # Directory of prebuilt tools
-COPY download/ ${BUILD_DIR}/download/
+COPY download/ ${APP_DIR}/download/
 
-# Copy source
-COPY rhasspyasr_pocketsphinx_hermes/ ${BUILD_DIR}/rhasspyasr_pocketsphinx_hermes/
-
-# Autoconf
-COPY m4/ ${BUILD_DIR}/m4/
 COPY Makefile setup.py requirements.txt \
-     ${BUILD_DIR}/
+     ${APP_DIR}/
 
-COPY VERSION README.md LICENSE ${BUILD_DIR}/
+COPY scripts/ \
+     ${APP_DIR}/scripts/
 
 # IFDEF PYPI
 #! ENV PIP_INDEX_URL=http://${PYPI}/simple/
 #! ENV PIP_TRUSTED_HOST=${PYPI_HOST}
 # ENDIF
 
-RUN cd ${BUILD_DIR} && \
+RUN cd ${APP_DIR} && \
     make && \
     make install
 
@@ -127,7 +123,10 @@ ARG TARGETVARIANT
 FROM run-$TARGETARCH$TARGETVARIANT
 
 ENV APP_DIR=/usr/lib/rhasspy-asr-pocketsphinx-hermes
-COPY --from=build ${APP_DIR}/ ${APP_DIR}/
-COPY --from=build /build/rhasspy-asr-pocketsphinx-hermes /usr/bin/
+COPY --from=build ${APP_DIR}/.venv/ ${APP_DIR}/.venv/
 
-ENTRYPOINT ["bash", "/usr/bin/rhasspy-asr-pocketsphinx-hermes"]
+# Copy source
+COPY rhasspyasr_pocketsphinx_hermes/ ${APP_DIR}/rhasspyasr_pocketsphinx_hermes/
+COPY bin/rhasspy-asr-pocketsphinx-hermes ${APP_DIR}/bin/
+
+ENTRYPOINT ["bash", "/usr/lib/rhasspy-asr-pocketsphinx-hermes/bin/rhasspy-asr-pocketsphinx-hermes"]
