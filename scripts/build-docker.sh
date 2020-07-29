@@ -11,7 +11,7 @@ mkdir -p "${src_dir}/download"
 
 # -----------------------------------------------------------------------------
 
-: "${PLATFORMS=linux/amd64,linux/arm/v7,linux/arm64}"
+: "${PLATFORMS=linux/amd64,linux/arm/v7,linux/arm64,linux/arm/v6}"
 
 : "${DOCKER_REGISTRY=docker.io}"
 
