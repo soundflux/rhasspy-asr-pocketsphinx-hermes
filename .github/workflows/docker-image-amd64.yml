@@ -1,7 +1,7 @@
 name: Build x64 Docker Images
 on:
   push:
-    branches: [ main ]
+    branches: [ master, main ]
 jobs:
 
   build:
