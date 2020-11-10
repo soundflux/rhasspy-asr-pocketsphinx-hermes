@@ -47,7 +47,7 @@ FROM build-ubuntu as build-amd64
 # Build
 # -----------------------------------------------------------------------------
 
-FROM build-ubuntu as build
+FROM build-amd64 as build
 
 ENV APP_DIR=/usr/lib/rhasspy-asr-pocketsphinx-hermes
 ENV BUILD_DIR=/build

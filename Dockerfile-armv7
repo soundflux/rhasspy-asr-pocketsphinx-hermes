@@ -5,12 +5,12 @@
 # Requires Docker buildx: https://docs.docker.com/buildx/working-with-buildx/
 # See scripts/build-docker.sh
 #
-# Builds a multi-arch image for amd64/armv6/armv7/arm64.
+# Builds a multi-arch image for armv7/armv6/armv7/arm64.
 # The virtual environment from the build stage is copied over to the run stage.
 # The Rhasspy source code is then copied into the run stage and executed within
 # that virtual environment.
 #
-# Build stages are named build-$TARGETARCH$TARGETVARIANT, so build-amd64,
+# Build stages are named build-$TARGETARCH$TARGETVARIANT, so build-armv7,
 # build-armv6, etc. Run stages are named similarly.
 #
 # armv6 images (Raspberry Pi 0/1) are derived from balena base images:
@@ -41,9 +41,7 @@ RUN apt-get update && \
 
 FROM build-ubuntu as build-armv7
 
-RUN install_packages \
-        swig curl ca-certificates
-
+# -----------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
 # Build
@@ -53,6 +51,7 @@ FROM build-armv7 as build
 
 ENV APP_DIR=/usr/lib/rhasspy-asr-pocketsphinx-hermes
 ENV BUILD_DIR=/build
+
 
 COPY Makefile setup.py requirements.txt \
      ${APP_DIR}/
@@ -81,6 +80,9 @@ RUN apt-get update && \
         sox
 
 FROM run-ubuntu as run-armv7
+
+# -----------------------------------------------------------------------------
+
 
 # -----------------------------------------------------------------------------
 # Run
