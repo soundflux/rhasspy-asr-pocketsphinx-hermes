@@ -41,6 +41,10 @@ RUN apt-get update && \
 
 FROM build-ubuntu as build-armv7
 
+RUN install_packages \
+        swig curl ca-certificates
+
+
 # -----------------------------------------------------------------------------
 # Build
 # -----------------------------------------------------------------------------
