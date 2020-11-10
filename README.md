@@ -1,7 +1,7 @@
 # Rhasspy ASR Pocketsphinx Hermes MQTT Service
 
-[![Continous Integration](https://github.com/rhasspy/rhasspy-asr-pocketsphinx-hermes/workflows/Tests/badge.svg)](https://github.com/rhasspy/rhasspy-asr-pocketsphinx-hermes/actions)
-[![GitHub license](https://img.shields.io/github/license/rhasspy/rhasspy-asr-pocketsphinx-hermes.svg)](https://github.com/rhasspy/rhasspy-asr-pocketsphinx-hermes/blob/master/LICENSE)
+![Docker Build/Publish Pocketsphinx Armv7 Image](https://github.com/soundflux/rhasspy-asr-pocketsphinx-hermes/workflows/Docker%20Build/Publish%20Pocketsphinx%20Armv7%20Image/badge.svg)
+![Build x64 Docker Images](https://github.com/soundflux/rhasspy-asr-pocketsphinx-hermes/workflows/Build%20x64%20Docker%20Images/badge.svg)
 
 Implements `hermes/asr` functionality from [Hermes protocol](https://docs.snips.ai/reference/hermes) using [rhasspy-asr-pocketsphinx](https://github.com/rhasspy/rhasspy-asr-pocketsphinx).
 
